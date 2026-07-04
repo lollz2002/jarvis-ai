@@ -287,7 +287,7 @@ function PluginsPanel() {
 
 // ── Peamine HUD ───────────────────────────────────────────────────────────────
 export default function GlassesHUD() {
-  const { status, results, loading, audio, analyze } = useJarvis(getDeviceId())
+  const { status, results, loading, audio, analyze, securityAlert } = useJarvis(getDeviceId())
   const { notifs, add: addNotif, dismiss } = useNotifications()
   const [sphereState, setSphereState] = useState('idle')
   const [listening, setListening]     = useState(false)
@@ -557,6 +557,22 @@ export default function GlassesHUD() {
             {id === 'plugins' && <PluginsPanel />}
           </FloatWin>
         ))}
+
+        {/* Turvahoiatus */}
+        {securityAlert && (
+          <div style={{
+            position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+            background: securityAlert.type === 'confirm_required' ? `${C.red}dd` :
+                        securityAlert.type === 'warning'          ? `${C.yellow}dd` : `${C.red}dd`,
+            border: `1px solid ${C.red}`,
+            borderRadius: 10, padding: '10px 20px', maxWidth: 480,
+            color: '#fff', fontSize: 13, fontFamily: 'system-ui',
+            animation: 'fadeIn 0.2s ease', zIndex: 200, pointerEvents: 'none',
+            textAlign: 'center',
+          }}>
+            {securityAlert.type === 'confirm_required' ? '⚠ ' : '🔒 '}{securityAlert.msg}
+          </div>
+        )}
 
         {/* Gesture tagasiside */}
         {gestureFeedback && (

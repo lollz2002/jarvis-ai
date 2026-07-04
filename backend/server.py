@@ -18,6 +18,7 @@ from voice.tts import text_to_speech
 from core.plugin_sdk import get_registry
 from core.monitor import get_stats as mon_stats, get_errors, get_tool_usage, get_audit_log, get_provider_health, audit
 from core.adapters import get_adapter, list_adapters
+from core.security import device_trust, rate_limiter, input_sanitizer, is_dangerous_action, create_backup, restore_backup
 
 API_VERSION = "v1"
 
@@ -46,10 +47,22 @@ connected_devices: dict[str, WebSocket] = {}
 @app.websocket("/ws/{device_id}")
 async def websocket_endpoint(websocket: WebSocket, device_id: str):
     await websocket.accept()
+
+    # Seadme usalduse kontroll
+    trust = device_trust.get_trust_level(device_id)
+    if trust == "unknown":
+        device_trust.register_device(device_id, auto_approve=True)
+        audit("device_first_seen", {"device_id": device_id})
+    elif trust == "pending":
+        await websocket.send_json({"type": "error", "msg": "Seade pole kinnitatud."})
+        await websocket.close()
+        return
+
     connected_devices[device_id] = websocket
     await broadcast({"type": "device_joined", "device": device_id, "total": len(connected_devices)}, exclude=device_id)
     await websocket.send_json({"type": "welcome", "device": device_id,
-                                "agents": get_agent_list(), "online": list(connected_devices.keys())})
+                                "agents": get_agent_list(), "online": list(connected_devices.keys()),
+                                "trust": device_trust.get_trust_level(device_id)})
     try:
         while True:
             data = await websocket.receive_json()
@@ -66,6 +79,28 @@ async def handle_ws_message(ws: WebSocket, device_id: str, data: dict):
         prompt = data.get("prompt", "")
         mode = data.get("mode", "default")
         targets = data.get("target_devices", [])
+
+        # Rate limiting
+        allowed, reason = rate_limiter.is_allowed(device_id)
+        if not allowed:
+            await ws.send_json({"type": "error", "msg": reason})
+            return
+
+        # Input sanitization
+        if prompt:
+            prompt, suspicious = input_sanitizer.sanitize(prompt)
+            if suspicious:
+                audit("suspicious_input", {"device": device_id, "hint": prompt[:60]})
+                await ws.send_json({"type": "warning", "msg": "Kahtlane sisend tuvastatud — töötlen ettevaatlikult."})
+
+        # Ohtlike toimingute kinnitus
+        if prompt:
+            dangerous, danger_desc = is_dangerous_action(prompt)
+            if dangerous:
+                audit("dangerous_action_blocked", {"device": device_id, "desc": danger_desc})
+                await ws.send_json({"type": "confirm_required",
+                    "msg": f"⚠ {danger_desc}. Kinnita: saada sama sõnum tekstiga 'KINNITAN: {prompt[:30]}'"})
+                return
 
         # 0. Plugin voice command dispatch (enne AI-d)
         if prompt:
@@ -355,6 +390,60 @@ def api_v1_health():
 @app.get("/api/v1/adapters")
 def api_v1_adapters():
     return {"adapters": list_adapters(), "version": API_VERSION}
+
+# ── Security endpoints ────────────────────────────────────────────────────────
+@app.get("/security/devices")
+def sec_devices():
+    return device_trust.list_devices()
+
+@app.post("/security/devices/{device_id}/approve")
+def sec_approve(device_id: str):
+    device_trust.approve_device(device_id)
+    audit("device_approved", {"device_id": device_id})
+    return {"ok": True}
+
+@app.post("/security/devices/{device_id}/revoke")
+def sec_revoke(device_id: str):
+    device_trust.revoke_device(device_id)
+    audit("device_revoked", {"device_id": device_id})
+    return {"ok": True}
+
+@app.delete("/security/devices/{device_id}")
+def sec_remove(device_id: str):
+    device_trust.remove_device(device_id)
+    audit("device_removed", {"device_id": device_id})
+    return {"ok": True}
+
+@app.get("/security/rate/{device_id}")
+def sec_rate(device_id: str):
+    return rate_limiter.get_usage(device_id)
+
+@app.post("/security/backup")
+async def sec_backup(request: Request):
+    body = await request.json()
+    password = body.get("password", "")
+    if len(password) < 8:
+        return {"error": "Parool peab olema vähemalt 8 tähemärki"}
+    encrypted = create_backup(password)
+    import base64
+    audit("backup_created", {})
+    return {"backup": base64.b64encode(encrypted).decode(), "ts": datetime.now().isoformat()}
+
+@app.post("/security/restore")
+async def sec_restore(request: Request):
+    body = await request.json()
+    password = body.get("password", "")
+    backup_b64 = body.get("backup", "")
+    if not backup_b64 or not password:
+        return {"error": "backup ja password on kohustuslikud"}
+    import base64
+    try:
+        encrypted = base64.b64decode(backup_b64)
+        data = restore_backup(encrypted, password)
+        audit("backup_restored", {"tables": list(data.keys())})
+        return {"ok": True, "restored": list(data.keys())}
+    except Exception as e:
+        return {"error": f"Taastamine ebaõnnestus: {e}"}
 
 if __name__ == "__main__":
     import uvicorn

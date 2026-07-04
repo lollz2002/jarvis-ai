@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 
-const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+const RAILWAY_URL = 'carefree-gentleness-production-6657.up.railway.app'
+const WS_URL = `wss://${RAILWAY_URL}/ws`
 
 export function useJarvis(deviceId) {
   const ws = useRef(null)
@@ -11,6 +12,7 @@ export function useJarvis(deviceId) {
   const [loading, setLoading] = useState(false)
   const [audio, setAudio] = useState(null)
   const [lastMsg, setLastMsg] = useState(null)
+  const [securityAlert, setSecurityAlert] = useState(null) // { type, msg }
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return
@@ -36,6 +38,22 @@ export function useJarvis(deviceId) {
         if (data.audio) setAudio(data.audio)
       } else if (data.type === 'broadcast_msg' || data.type === 'direct_msg') {
         setLastMsg(data)
+      } else if (data.type === 'error' || data.type === 'warning' || data.type === 'confirm_required') {
+        setSecurityAlert({ type: data.type, msg: data.msg })
+        setLoading(false)
+        setTimeout(() => setSecurityAlert(null), 8000)
+      } else if (data.type === 'browser_open') {
+        window.open(data.url, '_blank')
+      } else if (data.type === 'browser_search') {
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(data.query)}`, '_blank')
+      } else if (data.type === 'browser_navigate') {
+        window.location.href = data.url
+      } else if (data.type === 'phone_call') {
+        window.location.href = `tel:${data.number}`
+      } else if (data.type === 'phone_sms') {
+        window.location.href = `sms:${data.number}${data.body ? `?body=${encodeURIComponent(data.body)}` : ''}`
+      } else if (data.type === 'phone_email') {
+        window.location.href = `mailto:${data.to}?subject=${encodeURIComponent(data.subject||'')}&body=${encodeURIComponent(data.body||'')}`
       }
     }
     ws.current = socket
@@ -59,5 +77,5 @@ export function useJarvis(deviceId) {
     ws.current?.send(JSON.stringify({ type: 'broadcast', text }))
   }, [])
 
-  return { status, devices, agents, results, loading, audio, lastMsg, analyze, sendTo, broadcast }
+  return { status, devices, agents, results, loading, audio, lastMsg, securityAlert, analyze, sendTo, broadcast, wsRef: ws }
 }
