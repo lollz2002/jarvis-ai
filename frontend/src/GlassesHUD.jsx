@@ -12,6 +12,7 @@ import {
   GESTURES, WS_ORDER, getGestureFeedback,
 } from './engines/gestureEngine'
 import { C, FONT as font, HUDWidget, NotificationCard, StatusDot, Button, LoadingDots } from './components/ui'
+import { useWindowManager } from './hooks/useWindowManager'
 
 function getDeviceId() {
   let id = localStorage.getItem('jarvis_device_id')
@@ -53,60 +54,79 @@ const WIN_DEFS = {
 }
 
 // ── Ujuv aken ─────────────────────────────────────────────────────────────────
-function FloatWin({ id, title, icon, open, minimized, children, onClose, onMinimize, defaultPos, defaultW, defaultH }) {
-  const [pos, setPos]   = useState(defaultPos)
-  const [size, setSize] = useState({ w: defaultW, h: defaultH })
-  const [opacity, setOpacity] = useState(0.95)
-  const drag   = useRef(null)
-  const rsz    = useRef(null)
+function FloatWin({ winState, title, icon, children, onClose, onMinimize, onMaximize, onPin, onFocus, onPos, onSize, onOpacity, focused }) {
+  const drag = useRef(null)
+  const rsz  = useRef(null)
 
-  if (!open) return null
+  if (!winState?.open) return null
+
+  const { pos, size, opacity, minimized, maximized, pinned, zIndex } = winState
 
   function onDragStart(e) {
+    if (maximized || pinned) return
     if (e.target.closest('.wc') || e.target.closest('.rh')) return
+    onFocus()
     drag.current = { sx: e.clientX - pos.x, sy: e.clientY - pos.y }
-    const mv = e2 => { if (drag.current) setPos({ x: e2.clientX - drag.current.sx, y: e2.clientY - drag.current.sy }) }
+    const mv = e2 => { if (drag.current) onPos({ x: e2.clientX - drag.current.sx, y: e2.clientY - drag.current.sy }) }
     const up = () => { drag.current = null; window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up) }
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up)
   }
+
   function onRszStart(e) {
+    if (maximized) return
     e.stopPropagation()
     rsz.current = { sx: e.clientX, sy: e.clientY, w: size.w, h: size.h }
-    const mv = e2 => { if (rsz.current) setSize({ w: Math.max(180, rsz.current.w + e2.clientX - rsz.current.sx), h: Math.max(80, rsz.current.h + e2.clientY - rsz.current.sy) }) }
+    const mv = e2 => { if (rsz.current) onSize({ w: Math.max(180, rsz.current.w + e2.clientX - rsz.current.sx), h: Math.max(80, rsz.current.h + e2.clientY - rsz.current.sy) }) }
     const up = () => { rsz.current = null; window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up) }
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up)
   }
 
+  const maxStyle = maximized
+    ? { left: 0, top: 0, width: '100%', height: '100%', borderRadius: 0 }
+    : { left: pos.x, top: pos.y, width: size.w, height: minimized ? 36 : size.h }
+
   return (
-    <div style={{
-      position: 'absolute', left: pos.x, top: pos.y,
-      width: size.w, height: minimized ? 36 : size.h,
-      background: C.bg, border: `1px solid ${C.border}`,
-      borderRadius: 10, overflow: 'hidden',
-      backdropFilter: 'blur(16px)', opacity,
-      display: 'flex', flexDirection: 'column',
-      transition: 'height 0.2s, opacity 0.15s',
-      animation: 'fadeIn 0.2s ease',
-      zIndex: 20,
-    }}>
+    <div
+      onMouseDown={onFocus}
+      style={{
+        position: 'absolute',
+        ...maxStyle,
+        background: C.bg,
+        border: `1px solid ${focused ? C.orange + '80' : C.border}`,
+        borderRadius: maximized ? 0 : 10,
+        overflow: 'hidden',
+        backdropFilter: 'blur(16px)',
+        opacity,
+        display: 'flex', flexDirection: 'column',
+        transition: 'height 0.2s, opacity 0.15s, border-color 0.15s',
+        animation: 'fadeIn 0.2s ease',
+        zIndex,
+      }}
+    >
       {/* Tiitelriba */}
       <div onMouseDown={onDragStart} style={{
         display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px',
-        background: '#ffffff08', borderBottom: `1px solid ${C.border}`,
-        cursor: 'grab', userSelect: 'none', flexShrink: 0,
+        background: focused ? '#ffffff12' : '#ffffff08',
+        borderBottom: `1px solid ${C.border}`,
+        cursor: maximized || pinned ? 'default' : 'grab',
+        userSelect: 'none', flexShrink: 0,
+        transition: 'background 0.15s',
       }}>
         <span style={{ fontSize: 13 }}>{icon}</span>
-        <span style={{ flex: 1, fontSize: 10, color: C.orange, letterSpacing: 2, fontFamily: font }}>{title}</span>
+        <span style={{ flex: 1, fontSize: 10, color: focused ? C.orange : C.textDim, letterSpacing: 2, fontFamily: font, transition: 'color 0.15s' }}>{title}</span>
+        {pinned && <span style={{ fontSize: 9, color: C.blue, marginRight: 4 }}>📌</span>}
         <div className="wc" style={{ display: 'flex', gap: 5 }}>
-          <WBtn onClick={() => setOpacity(o => o > 0.6 ? 0.3 : 0.95)} title="Läbipaistvus">◑</WBtn>
-          <WBtn onClick={onMinimize}>{minimized ? '□' : '–'}</WBtn>
+          <WBtn onClick={() => onOpacity(opacity > 0.6 ? 0.3 : 0.95)} title="Läbipaistvus">◑</WBtn>
+          <WBtn onClick={onPin} title={pinned ? 'Vabasta' : 'Kinnita'} color={pinned ? C.blue : undefined}>📌</WBtn>
+          <WBtn onClick={onMaximize} title={maximized ? 'Taasta' : 'Maksimeeri'}>{maximized ? '❐' : '□'}</WBtn>
+          <WBtn onClick={onMinimize}>{minimized ? '▲' : '–'}</WBtn>
           <WBtn onClick={onClose} color={C.red}>✕</WBtn>
         </div>
       </div>
-      {/* Sisu */}
+      {/* Sisu — lazy: ei renderdeta minimeeritud akende sisu */}
       {!minimized && <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>}
       {/* Resize */}
-      {!minimized && <div className="rh" onMouseDown={onRszStart} style={{
+      {!minimized && !maximized && <div className="rh" onMouseDown={onRszStart} style={{
         position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, cursor: 'nwse-resize',
         background: `linear-gradient(135deg, transparent 50%, ${C.border} 50%)`,
       }} />}
@@ -275,7 +295,12 @@ export default function GlassesHUD() {
   const [listening, setListening]     = useState(false)
   const [interim, setInterim]         = useState('')
   const [ws, setWs]                   = useState('home')
-  const [wins, setWins]               = useState(() => Object.fromEntries(Object.keys(WIN_DEFS).map(k => [k, { open: k === 'jarvis' || k === 'clock', minimized: false }])))
+  const {
+    wins, focusedId,
+    openWin, closeWin, minimizeWin, maximizeWin, pinWin, focus,
+    setWinPos, setWinSize, setWinOpacity,
+    applyWorkspace, closeAll,
+  } = useWindowManager(WIN_DEFS, { jarvis: true, clock: true })
   const [notes, setNotes]             = useState([])
   const [subtitles, setSubtitles]     = useState(false)
   const [gestureFeedback, setGestureFeedback] = useState(null) // { text, ts }
@@ -348,13 +373,9 @@ export default function GlassesHUD() {
   function applyWs(id) {
     setWs(id)
     const cfg = WORKSPACES[id]
-    setWins(prev => Object.fromEntries(Object.keys(WIN_DEFS).map(k => [k, { ...prev[k], open: !!cfg.wins[k], minimized: false }])))
+    applyWorkspace(cfg.wins)
     addNotif(`Workspace: ${cfg.name}`, 'info')
   }
-  function openWin(id) { setWins(w => ({ ...w, [id]: { open: true, minimized: false } })) }
-  function closeWin(id) { setWins(w => ({ ...w, [id]: { ...w[id], open: false } })) }
-  function minWin(id)   { setWins(w => ({ ...w, [id]: { ...w[id], minimized: !w[id].minimized } })) }
-  function closeAll()   { setWins(w => Object.fromEntries(Object.keys(w).map(k => [k, { ...w[k], open: k === 'jarvis' }]))) }
 
   function toggleMic() {
     if (activeRef.current) { activeRef.current = false; clearTimeout(timerRef.current); recogRef.current?.abort(); setListening(false) }
@@ -397,21 +418,15 @@ export default function GlassesHUD() {
         showGestureFeedback(GESTURES.SWIPE_UP)
       }),
       onGesture(GESTURES.SWIPE_DOWN, () => {
-        setWins(w => {
-          const open = Object.keys(w).filter(k => w[k]?.open && k !== 'jarvis')
-          if (open.length) { showGestureFeedback(GESTURES.SWIPE_DOWN); return { ...w, [open[0]]: { ...w[open[0]], minimized: true } } }
-          return w
-        })
+        const openIds = Object.keys(wins).filter(k => wins[k]?.open && k !== 'jarvis')
+        if (openIds.length) { minimizeWin(openIds[0]); showGestureFeedback(GESTURES.SWIPE_DOWN) }
       }),
       onGesture(GESTURES.OPEN_PALM, () => {
         openWin('jarvis'); showGestureFeedback(GESTURES.OPEN_PALM)
       }),
       onGesture(GESTURES.CLOSED_FIST, () => {
-        setWins(w => {
-          const open = Object.keys(w).filter(k => w[k]?.open && k !== 'jarvis')
-          if (open.length) { showGestureFeedback(GESTURES.CLOSED_FIST); return { ...w, [open[open.length - 1]]: { ...w[open[open.length - 1]], open: false } } }
-          return w
-        })
+        const openIds = Object.keys(wins).filter(k => wins[k]?.open && k !== 'jarvis')
+        if (openIds.length) { closeWin(openIds[openIds.length - 1]); showGestureFeedback(GESTURES.CLOSED_FIST) }
       }),
     ]
     return () => { detachTouchAdapter(); offs.forEach(off => off()) }
@@ -508,14 +523,16 @@ export default function GlassesHUD() {
       }}>
         <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, marginBottom: 8 }}>AVATUD AKNAD</div>
         {Object.entries(WIN_DEFS).filter(([id]) => wins[id]?.open).map(([id, def]) => (
-            <div key={id} style={{
+            <div key={id} onClick={() => focus(id)} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: '#ffffff08', border: `1px solid ${C.border}`,
+              background: focusedId === id ? `${C.orange}18` : '#ffffff08',
+              border: `1px solid ${focusedId === id ? C.orange + '60' : C.border}`,
               borderRadius: 5, padding: '4px 8px', marginBottom: 3,
-              fontSize: 11, color: C.text,
+              fontSize: 11, color: C.text, cursor: 'pointer',
+              transition: 'background 0.15s, border-color 0.15s',
             }}>
-              <span>{def.icon} {def.title}</span>
-              <button onClick={() => closeWin(id)} style={{ background: 'none', border: 'none', color: C.textDim, cursor: 'pointer', fontSize: 11 }}>✕</button>
+              <span style={{ color: focusedId === id ? C.orange : C.text }}>{def.icon} {def.title}</span>
+              <button onClick={e => { e.stopPropagation(); closeWin(id) }} style={{ background: 'none', border: 'none', color: C.textDim, cursor: 'pointer', fontSize: 11 }}>✕</button>
             </div>
         ))}
       </div>
@@ -523,10 +540,18 @@ export default function GlassesHUD() {
       {/* ══ UJUVAD AKNAD ══════════════════════════════════════════════════════ */}
       <div style={{ position: 'absolute', top: 44, left: 200, right: 160, bottom: 52, overflow: 'hidden' }}>
         {Object.entries(WIN_DEFS).map(([id, def]) => (
-          <FloatWin key={id} id={id} title={def.title} icon={def.icon}
-            open={wins[id]?.open} minimized={wins[id]?.minimized}
-            onClose={() => closeWin(id)} onMinimize={() => minWin(id)}
-            defaultPos={def.defaultPos} defaultW={def.w} defaultH={def.h}>
+          <FloatWin key={id}
+            winState={wins[id]}
+            title={def.title} icon={def.icon}
+            focused={focusedId === id}
+            onClose={() => closeWin(id)}
+            onMinimize={() => minimizeWin(id)}
+            onMaximize={() => maximizeWin(id)}
+            onPin={() => pinWin(id)}
+            onFocus={() => focus(id)}
+            onPos={pos => setWinPos(id, pos)}
+            onSize={size => setWinSize(id, size)}
+            onOpacity={o => setWinOpacity(id, o)}>
             {id === 'jarvis'  && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} />}
             {id === 'browser' && <BrowserPanel />}
             {id === 'camera'  && <CameraPanel />}
