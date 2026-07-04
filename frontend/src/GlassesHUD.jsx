@@ -11,22 +11,7 @@ import {
   onGesture, setSafetyContext,
   GESTURES, WS_ORDER, getGestureFeedback,
 } from './engines/gestureEngine'
-
-// ── Värvid (08_AR_UI_BIBLE.md) ────────────────────────────────────────────────
-const C = {
-  bg:       '#00000099',
-  border:   '#ffffff18',
-  blue:     '#3b82f6',   // system
-  orange:   '#f97316',   // AI
-  green:    '#22c55e',   // success
-  yellow:   '#eab308',   // warning
-  red:      '#ef4444',   // critical
-  text:     '#f1f5f9',
-  textDim:  '#94a3b8',
-  gold:     '#ffaa00',
-}
-
-const font = "'Courier New', monospace"
+import { C, FONT as font, HUDWidget, NotificationCard, StatusDot, Button, LoadingDots } from './components/ui'
 
 function getDeviceId() {
   let id = localStorage.getItem('jarvis_device_id')
@@ -35,19 +20,16 @@ function getDeviceId() {
 }
 
 // ── Notifikatsiooni süsteem ───────────────────────────────────────────────────
-let _notifId = 0
 function useNotifications() {
   const [notifs, setNotifs] = useState([])
   const add = useCallback((msg, level = 'info') => {
-    const id = ++_notifId
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     setNotifs(n => [{ id, msg, level, ts: Date.now() }, ...n.slice(0, 9)])
     if (level !== 'critical') setTimeout(() => setNotifs(n => n.filter(x => x.id !== id)), 8000)
   }, [])
   const dismiss = useCallback((id) => setNotifs(n => n.filter(x => x.id !== id)), [])
   return { notifs, add, dismiss }
 }
-
-const NOTIF_COLOR = { critical: C.red, important: C.yellow, info: C.blue, success: C.green }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
 const WORKSPACES = {
@@ -466,16 +448,19 @@ export default function GlassesHUD() {
         <ClockMini />
 
         {/* Aku */}
-        {battery !== null && <TopItem color={battery < 20 ? C.red : C.green}>🔋{battery}%</TopItem>}
+        {battery !== null && <HUDWidget icon="🔋" value={`${battery}%`} color={battery < 20 ? C.red : C.green} blink={battery < 20} />}
 
         {/* WiFi */}
-        <TopItem color={navigator.onLine ? C.green : C.red}>{navigator.onLine ? '📶' : '📵'}</TopItem>
+        <HUDWidget icon={navigator.onLine ? '📶' : '📵'} value={navigator.onLine ? 'ON' : 'OFF'} color={navigator.onLine ? C.green : C.red} />
 
         {/* AI Provider */}
-        <TopItem color={C.orange}>AI: {status === 'online' ? 'GPT-4o' : '—'}</TopItem>
+        <HUDWidget icon="🤖" value={status === 'online' ? 'GPT-4o' : '—'} color={C.orange} />
 
         {/* Ühendus */}
-        <TopItem color={statusColor}>● {status.toUpperCase()}</TopItem>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <StatusDot status={status} />
+          <span style={{ fontSize: 10, color: C.textDim, fontFamily: font, letterSpacing: 1 }}>{status.toUpperCase()}</span>
+        </div>
 
         <div style={{ flex: 1 }} />
 
@@ -498,13 +483,7 @@ export default function GlassesHUD() {
         <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, marginBottom: 8 }}>NOTIFICATIONS</div>
         {notifs.length === 0 && <div style={{ fontSize: 11, color: '#333', textAlign: 'center', marginTop: 20 }}>Puhas</div>}
         {notifs.map(n => (
-          <div key={n.id} onClick={() => dismiss(n.id)} style={{
-            background: `${NOTIF_COLOR[n.level] || C.blue}18`,
-            border: `1px solid ${NOTIF_COLOR[n.level] || C.blue}50`,
-            borderLeft: `3px solid ${NOTIF_COLOR[n.level] || C.blue}`,
-            borderRadius: 5, padding: '5px 8px', marginBottom: 5, cursor: 'pointer',
-            fontSize: 11, color: C.text, animation: 'fadeIn 0.2s ease',
-          }}>{n.msg}</div>
+          <NotificationCard key={n.id} level={n.level} msg={n.msg} onDismiss={() => dismiss(n.id)} />
         ))}
 
         <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '14px 0 8px' }}>WORKSPACE</div>
