@@ -13,6 +13,7 @@ import {
 } from './engines/gestureEngine'
 import { C, FONT as font, HUDWidget, NotificationCard, StatusDot, Button, LoadingDots } from './components/ui'
 import { useWindowManager } from './hooks/useWindowManager'
+import { useDeviceManager } from './hooks/useDeviceManager'
 
 function getDeviceId() {
   let id = localStorage.getItem('jarvis_device_id')
@@ -291,6 +292,7 @@ function PluginsPanel() {
 export default function GlassesHUD() {
   const { status, results, loading, audio, analyze, securityAlert } = useJarvis(getDeviceId())
   const { notifs, add: addNotif, dismiss } = useNotifications()
+  const { device, adapter, layout, profile } = useDeviceManager()
   const [sphereState, setSphereState] = useState('idle')
   const [listening, setListening]     = useState(false)
   const [interim, setInterim]         = useState('')
@@ -375,6 +377,10 @@ export default function GlassesHUD() {
     const cfg = WORKSPACES[id]
     applyWorkspace(cfg.wins)
     addNotif(`Workspace: ${cfg.name}`, 'info')
+    // Safe walking/driving: XR layout reeglite alusel sulge mittevajalikud aknad
+    if ((id === 'driving' || id === 'walking') && layout?.safeWalkingReduced) {
+      addNotif('Turvaline režiim: mittevajalikud aknad suletud', 'warning')
+    }
   }
 
   function toggleMic() {
@@ -471,6 +477,9 @@ export default function GlassesHUD() {
         {/* AI Provider */}
         <HUDWidget icon="🤖" value={status === 'online' ? 'GPT-4o' : '—'} color={C.orange} />
 
+        {/* XR seade */}
+        {adapter && <HUDWidget icon="🥽" value={adapter.getLabel()} color={C.blue} label={`Profiil: ${profile}`} />}
+
         {/* Ühendus */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <StatusDot status={status} />
@@ -561,6 +570,15 @@ export default function GlassesHUD() {
             {id === 'plugins' && <PluginsPanel />}
           </FloatWin>
         ))}
+
+        {/* AR keepCenterClear — näitab tsentraalse vaatevälja piiri */}
+        {layout?.keepCenterClear && (
+          <div style={{
+            position: 'absolute', top: '30%', left: '20%', right: '20%', bottom: '25%',
+            border: `1px dashed ${C.border}`,
+            borderRadius: 12, pointerEvents: 'none', zIndex: 5,
+          }} />
+        )}
 
         {/* Turvahoiatus */}
         {securityAlert && (
