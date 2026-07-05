@@ -21,7 +21,7 @@ import sqlite3
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -63,7 +63,7 @@ class DeviceTrust:
 
     def register_device(self, device_id: str, label: str = "", auto_approve: bool = False):
         """Registreerib seadme — auto_approve=True kohalike/tuttavate seadmete jaoks."""
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._conn() as c:
             existing = c.execute(
                 "SELECT device_id FROM trusted_devices WHERE device_id=?",
@@ -80,7 +80,7 @@ class DeviceTrust:
                      now if auto_approve else None))
 
     def approve_device(self, device_id: str):
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._conn() as c:
             c.execute("""UPDATE trusted_devices
                 SET approved=1, approved_at=? WHERE device_id=?""",
@@ -480,21 +480,21 @@ def _audit_security_event(event_type: str, data: dict) -> None:
 def audit_login(device_id: str, success: bool, method: str = "websocket") -> None:
     _audit_security_event("login", {
         "device_id": device_id, "success": success, "method": method,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
     })
 
 
 def audit_memory_deletion(device_id: str, table: str, record_id: str) -> None:
     _audit_security_event("memory_deletion", {
         "device_id": device_id, "table": table, "record_id": record_id,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
     })
 
 
 def audit_plugin_install(plugin_id: str, device_id: str, version: str = "") -> None:
     _audit_security_event("plugin_installed", {
         "plugin_id": plugin_id, "device_id": device_id, "version": version,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -503,14 +503,14 @@ def audit_permission_change(device_id: str, target: str, action: str,
     _audit_security_event("permission_change", {
         "device_id": device_id, "target": target,
         "action": action, "permissions": permissions,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
     })
 
 
 def audit_provider_change(old_provider: str, new_provider: str, device_id: str = "") -> None:
     _audit_security_event("provider_changed", {
         "old": old_provider, "new": new_provider, "device_id": device_id,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
     })
 
 

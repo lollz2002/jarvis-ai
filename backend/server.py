@@ -2,7 +2,8 @@ import asyncio
 import base64
 import json
 import os
-from datetime import datetime
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,12 +30,14 @@ from core.security import (
 
 API_VERSION = "v1"
 
-app = FastAPI(title="Albert OS API", version=API_VERSION)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ── Plugin käivitamine ─────────────────────────────────────────────────────────
-@app.on_event("startup")
-async def _load_plugins():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Rakenduse elutsükkel: startup → yield → shutdown."""
+    import logging
+    log = logging.getLogger("server")
+
+    # ── Startup ───────────────────────────────────────────────────────────────
     reg = get_registry()
     try:
         from plugins.calendar_plugin      import CalendarPlugin
@@ -45,33 +48,40 @@ async def _load_plugins():
             reg.register(p)
         await reg.initialize_all()
     except Exception as e:
-        import logging
-        logging.getLogger("server").warning(f"Plugin load viga: {e}")
+        log.warning("Plugin load viga: %s", e)
 
-    # Project Brain — initsialiseerib vaikimisi projektiruumid
     try:
         from memory.memory import init_project_brain
         init_project_brain()
     except Exception:
         pass
 
-    # Runtime Kernel käivitus (36_RUNTIME_AND_EVENT_SYSTEM_BIBLE.md)
     try:
         from core.runtime import kernel
         await kernel.start()
     except Exception as e:
-        import logging
-        logging.getLogger("server").warning("Runtime kernel start warning: %s", e)
+        log.warning("Runtime kernel start warning: %s", e)
 
-    # Networking Layer + Sync Engine (39_NETWORKING_AND_CLOUD_BIBLE.md)
     try:
         from core.networking import networking
         from core.sync import sync_engine
         await networking.start_retry_loop(interval_s=60)
         await sync_engine.start(interval_s=120)
     except Exception as e:
-        import logging
-        logging.getLogger("server").warning("Networking/Sync start warning: %s", e)
+        log.warning("Networking/Sync start warning: %s", e)
+
+    yield   # rakendus töötab siin
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    try:
+        from core.sync import sync_engine
+        await sync_engine.stop()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="Albert OS API", version=API_VERSION, lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # ── Ühendatud seadmed ──────────────────────────────────────────────────────────
 connected_devices: dict[str, WebSocket] = {}

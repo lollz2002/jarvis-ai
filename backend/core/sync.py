@@ -16,7 +16,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from core.networking import networking, NetworkState
@@ -57,7 +57,7 @@ def mark_dirty(table: str, record_id: int | str, operation: str = "upsert",
         "record_id":  record_id,
         "operation":  operation,
         "data":       data or {},
-        "ts":         datetime.utcnow().isoformat(),
+        "ts":         datetime.now(timezone.utc).isoformat(),
         "synced":     False,
     })
 

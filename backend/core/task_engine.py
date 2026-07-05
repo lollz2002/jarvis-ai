@@ -13,7 +13,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Callable, Any
 
@@ -71,7 +71,7 @@ class ScheduledTask:
     action:       str = ""        # tegevuse tüüp (nt "send_message", "summarize")
     params:       dict = field(default_factory=dict)
     recurrence:   str | None = None  # "daily" | "weekly" | "hourly"
-    created_at:   str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at:   str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     completed_at: str | None = None
     result:       Any  = None
     error:        str | None = None
@@ -172,7 +172,7 @@ class TaskEngine:
             else:
                 task.result = f"No handler for action '{task.action}'"
             task.status       = TaskStatus.COMPLETED
-            task.completed_at = datetime.utcnow().isoformat()
+            task.completed_at = datetime.now(timezone.utc).isoformat()
             audit("task_completed", {"task_id": task_id, "action": task.action})
             emit_sync(MEMORY_UPDATED, {"type": "task_completed", "task_id": task_id},
                       source="TaskEngine")
