@@ -466,6 +466,42 @@ def api_v1_events(n: int = 50):
     from core.events import get_history
     return {"events": get_history(n)}
 
+# ── Agent Manager endpoints (34_AUTONOMOUS_AGENT_BIBLE.md) ───────────────────
+from agents.agent_manager import manager as agent_manager
+
+@app.get("/api/v1/agents/types")
+def agents_types():
+    return {"agent_types": agent_manager.agent_types()}
+
+@app.post("/api/v1/agents/tasks")
+async def agents_create_task(request: Request):
+    """Loo uus agendi ülesanne ja käivita taustal."""
+    body = await request.json()
+    agent_type = body.get("agent_type", "research")
+    objective  = body.get("objective", "")
+    background = body.get("background", True)
+    if not objective:
+        return {"error": "objective required"}
+    extra = {k: v for k, v in body.items() if k not in ("agent_type", "objective", "background")}
+    task = agent_manager.create_task(agent_type, objective)
+    if background:
+        await agent_manager.run_task_background(task.task_id, **extra)
+        return {"task_id": task.task_id, "status": "started"}
+    else:
+        task = await agent_manager.run_task(task.task_id, **extra)
+        return task.to_dict()
+
+@app.get("/api/v1/agents/tasks")
+def agents_list_tasks(agent_type: str = None, status: str = None):
+    return {"tasks": agent_manager.list_tasks(agent_type=agent_type, status=status)}
+
+@app.get("/api/v1/agents/tasks/{task_id}")
+def agents_get_task(task_id: str):
+    task = agent_manager.get_task(task_id)
+    if not task:
+        return {"error": "not found"}
+    return task.to_dict()
+
 # ── Security endpoints ────────────────────────────────────────────────────────
 @app.get("/security/devices")
 def sec_devices():
