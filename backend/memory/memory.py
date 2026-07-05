@@ -253,6 +253,8 @@ def add_project_entry(project_name: str, entry_type: str, content: str):
                   (project_name, entry_type, content, datetime.now().isoformat()))
     _index_memory(content[:60], "project_entry", project=project_name,
                   importance=0.8 if entry_type in ("maintenance", "wiring", "part") else 0.5)
+    from core.events import emit_sync, MEMORY_UPDATED
+    emit_sync(MEMORY_UPDATED, {"type": "project_entry", "project": project_name, "entry_type": entry_type})
 
 def get_project_entries(project_name: str, entry_type: str = None) -> list:
     with _conn() as c:

@@ -322,6 +322,8 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
     """
     record_tool(name)   # monitoring
     audit("tool_called", {"tool": name, "args_keys": list(args.keys())})
+    from core.events import emit_sync, TOOL_EXECUTED
+    emit_sync(TOOL_EXECUTED, {"tool": name, "args_keys": list(args.keys())})
 
     if name == "change_voice_speed":
         _config["voice_speed"] = args.get("speed", 0.95)

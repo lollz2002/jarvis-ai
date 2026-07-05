@@ -26,6 +26,7 @@ from core.response_composer import (
     compose_parallel_results, compose,
     cache_get, cache_set,
 )
+from core.events import emit_sync, USER_REQUEST_RECEIVED, PROVIDER_SELECTED, RESPONSE_COMPOSED
 from engines.vision_engine import detect_vision_mode, get_vision_system_prompt, should_save_to_project, preprocess_image
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -215,6 +216,12 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
     active_project = detect_active_project(prompt or "")
     routing = ROUTING.get(intent, ROUTING["general"])
 
+    emit_sync(USER_REQUEST_RECEIVED, {
+        "intent": intent, "lang": lang,
+        "has_image": bool(image_b64), "active_project": active_project,
+        "prompt_len": len(prompt or ""),
+    })
+
     # ── Vahemälu kontroll (tekstipäringud, mitte pildid) ──────────────────────
     if not image_b64:
         primary_provider = routing["primary"]
@@ -259,6 +266,8 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
     primary = routing["primary"]
     verify_with = routing["verify_with"]
     run_parallel = routing.get("parallel", False) and verify_with
+
+    emit_sync(PROVIDER_SELECTED, {"primary": primary, "verify_with": verify_with, "parallel": run_parallel, "intent": intent})
 
     # ── Paralleelne täitmine + Response Composer ─────────────────────────────
     if run_parallel and verify_with:
@@ -322,6 +331,10 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
         "intent": intent, "provider": primary,
         "has_text": bool(text), "confidence": confidence,
         "active_project": active_project, "lang": lang,
+    })
+    emit_sync(RESPONSE_COMPOSED, {
+        "intent": intent, "provider": primary, "confidence": confidence,
+        "response_len": len(text or ""), "lang": lang,
     })
     return text or "Все системы недоступны, сэр.", ws_commands
 

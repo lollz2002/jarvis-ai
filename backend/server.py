@@ -454,6 +454,12 @@ def api_v1_health():
 def api_v1_adapters():
     return {"adapters": list_adapters(), "version": API_VERSION}
 
+@app.get("/api/v1/events")
+def api_v1_events(n: int = 50):
+    """Viimased N sündmust event bus'ist (debug/monitor)."""
+    from core.events import get_history
+    return {"events": get_history(n)}
+
 # ── Security endpoints ────────────────────────────────────────────────────────
 @app.get("/security/devices")
 def sec_devices():
