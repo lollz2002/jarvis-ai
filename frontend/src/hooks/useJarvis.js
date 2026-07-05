@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 
-const RAILWAY_URL = 'carefree-gentleness-production-6657.up.railway.app'
-const WS_URL = `wss://${RAILWAY_URL}/ws`
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://carefree-gentleness-production-6657.up.railway.app'
+const WS_URL = `${BACKEND_URL.replace(/^http/, 'ws')}/ws`
 
 export function useJarvis(deviceId) {
   const ws = useRef(null)

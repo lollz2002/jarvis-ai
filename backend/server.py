@@ -1,12 +1,52 @@
 import asyncio
 import base64
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ── Startup env validation ────────────────────────────────────────────────────
+def _check_env() -> None:
+    """Log which env vars are set/missing. Never crashes — missing = degraded."""
+    log = logging.getLogger("albert.startup")
+    required = {
+        "OPENAI_API_KEY":     "GPT-4o, TTS voice",
+        "ANTHROPIC_API_KEY":  "Claude (coding/diagnostics)",
+        "GEMINI_API_KEY":     "Gemini (translation/vision)",
+    }
+    optional = {
+        "PERPLEXITY_API_KEY": "real-time research",
+        "ELEVENLABS_API_KEY": "ElevenLabs TTS fallback",
+        "CLOUD_SYNC_URL":     "cloud sync (skipped if missing)",
+        "DEVICE_ID":          "device identity",
+    }
+    missing_required = []
+    for key, desc in required.items():
+        if os.getenv(key):
+            log.info("  ✓ %-25s (%s)", key, desc)
+        else:
+            log.warning("  ✗ %-25s MISSING — %s will be unavailable", key, desc)
+            missing_required.append(key)
+    for key, desc in optional.items():
+        if os.getenv(key):
+            log.info("  ✓ %-25s (%s)", key, desc)
+        else:
+            log.info("  - %-25s not set — %s", key, desc)
+
+    if missing_required:
+        log.warning("Albert OS starting in DEGRADED mode — set missing keys in Railway env vars.")
+        log.warning("Fallback chain active: %s", " -> ".join(
+            k.replace("_API_KEY","").lower() for k in required if os.getenv(k)
+        ) or "no providers configured!")
+    else:
+        log.info("Albert OS starting with all required providers configured.")
+
+logging.basicConfig(level=logging.INFO)
+_check_env()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
