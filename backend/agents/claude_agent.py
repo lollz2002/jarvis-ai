@@ -2,9 +2,15 @@ import anthropic
 import os
 from agents.personality import JARVIS_SYSTEM
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_client = None
 
-async def analyze(image_b64: str = None, mime: str = "image/jpeg", prompt: str = "", mode: str = "default") -> str:
+def get_client():
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+    return _client
+
+async def analyze(image_b64: str = None, mime: str = "image/jpeg", prompt: str = "", mode: str = "default", memory_context: str = "") -> str:
     content = []
     if image_b64:
         content.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": image_b64}})
@@ -12,10 +18,14 @@ async def analyze(image_b64: str = None, mime: str = "image/jpeg", prompt: str =
     user_prompt = prompt or _default_prompt(mode)
     content.append({"type": "text", "text": user_prompt})
 
-    resp = client.messages.create(
+    system = JARVIS_SYSTEM
+    if memory_context:
+        system = f"{JARVIS_SYSTEM}\n\n{memory_context}"
+
+    resp = get_client().messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=JARVIS_SYSTEM,
+        max_tokens=300,
+        system=system,
         messages=[{"role": "user", "content": content}]
     )
     return resp.content[0].text

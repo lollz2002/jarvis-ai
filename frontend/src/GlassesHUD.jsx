@@ -538,6 +538,13 @@ function SettingsPanel({ prefs, setPrefs, onResetWizard }) {
       ))}
 
       <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>AR / SEADE</div>
+      {row('Glasses Mode', (
+        <button
+          onClick={() => { setPrefs({ glassesMode: false }); window.location.href = '/' }}
+          style={{ background: `${C.red}18`, border: `1px solid ${C.red}50`, color: C.red, borderRadius: 4, padding: '2px 10px', fontSize: 10, cursor: 'pointer', fontFamily: font }}>
+          VÄLJAS ✕
+        </button>
+      ))}
       {row('AR profiil', sel('arProfile', [
         { label: 'Automaatne', value: 'auto' },
         { label: 'Telefon', value: 'phone' },
@@ -847,6 +854,7 @@ export default function GlassesHUD() {
         display: 'flex', alignItems: 'center', padding: '0 16px', gap: 14, zIndex: 100,
       }}>
         <span style={{ fontSize: 11, letterSpacing: 4, color: C.orange, fontWeight: 700 }}>ALBERT OS</span>
+        <span style={{ fontSize: 8, letterSpacing: 2, color: C.blue, background: `${C.blue}15`, border: `1px solid ${C.blue}50`, borderRadius: 3, padding: '1px 6px' }}>🥽 GLASSES</span>
         <div style={{ width: 1, height: 18, background: C.border }} />
 
         {/* Kellaaeg */}

@@ -2,7 +2,13 @@ from openai import AsyncOpenAI
 import os
 from agents.personality import JARVIS_SYSTEM
 
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_client = None
+
+def get_client():
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+    return _client
 
 async def analyze(image_b64: str = None, mime: str = "image/jpeg", prompt: str = "", mode: str = "default") -> str:
     content = []
@@ -12,9 +18,9 @@ async def analyze(image_b64: str = None, mime: str = "image/jpeg", prompt: str =
     user_prompt = prompt or _default_prompt(mode)
     content.append({"type": "text", "text": user_prompt})
 
-    resp = await client.chat.completions.create(
-        model="gpt-4o",
-        max_tokens=1024,
+    resp = await get_client().chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=300,
         messages=[
             {"role": "system", "content": JARVIS_SYSTEM},
             {"role": "user", "content": content}

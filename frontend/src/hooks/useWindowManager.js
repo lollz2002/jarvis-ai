@@ -126,6 +126,32 @@ export function useWindowManager(WIN_DEFS, initialWorkspaceWins = {}) {
   }, [])
 
   /**
+   * Snap window to a named position.
+   * Spek: 31_UI_BIBLE.md — Floating Window actions: Snap
+   * @param {string} id  — window id
+   * @param {string} to  — 'tl'|'tr'|'bl'|'br'|'left'|'right'|'center'|'top'
+   */
+  const snapWin = useCallback((id, to) => {
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const w  = wins[id]?.size?.w || WIN_DEFS[id]?.w || 320
+    const h  = wins[id]?.size?.h || WIN_DEFS[id]?.h || 280
+    const GAP = 8
+    const positions = {
+      tl:     { x: GAP,              y: GAP },
+      tr:     { x: vw - w - GAP,     y: GAP },
+      bl:     { x: GAP,              y: vh - h - GAP - 52 },
+      br:     { x: vw - w - GAP,     y: vh - h - GAP - 52 },
+      left:   { x: GAP,              y: Math.round((vh - h) / 2) },
+      right:  { x: vw - w - GAP,     y: Math.round((vh - h) / 2) },
+      center: { x: Math.round((vw - w) / 2), y: Math.round((vh - h) / 2) },
+      top:    { x: Math.round((vw - w) / 2), y: GAP },
+    }
+    const pos = positions[to]
+    if (pos) persist(id, { pos })
+  }, [wins, WIN_DEFS, persist])
+
+  /**
    * Safe Walking Mode — liiguta aknad servadesse, vähenda läbipaistvust.
    * Spek: 26_AR_RUNTIME_AND_RENDER_ENGINE.md
    * Avab ainult jarvis + clock, paneb teised minimiseerituks + opacity 0.5.
@@ -171,6 +197,7 @@ export function useWindowManager(WIN_DEFS, initialWorkspaceWins = {}) {
     setWinOpacity,
     applyWorkspace,
     applySafeWalking,
+    snapWin,
     closeAll,
   }
 }

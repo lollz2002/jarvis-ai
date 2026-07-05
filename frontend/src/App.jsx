@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import { useJarvis } from './hooks/useJarvis'
 import { useDeviceManager } from './hooks/useDeviceManager'
 import { useAudio } from './hooks/useAudio'
+import { useUserPrefs } from './hooks/useUserPrefs'
 import JarvisSphere from './components/JarvisSphere'
 import Camera from './components/Camera'
 import VoiceInput from './components/VoiceInput'
@@ -41,6 +42,26 @@ export default function App() {
   const { status, devices, agents, results, loading, audio, lastMsg, analyze, sendTo, broadcast, wsRef } = useJarvis(DEVICE_ID)
   const { device, switchToAR } = useDeviceManager()
   const { unlocked, playing: audioPlaying, playBase64, stop: stopAudio } = useAudio()
+  const { prefs, setPrefs } = useUserPrefs()
+
+  // XREAL auto-detect: DeviceManager sets type='glasses' for 1920×1080 non-mobile, /glasses, or ?ar=1
+  const isXREALDetected = device.type === 'glasses' || device.isAR
+
+  // If Glasses Mode pref is active, redirect to /glasses immediately
+  useEffect(() => {
+    if (prefs.glassesMode && window.location.pathname !== '/glasses') {
+      window.location.replace('/glasses')
+    }
+  }, [])
+
+  function toggleGlassesMode() {
+    if (prefs.glassesMode) {
+      setPrefs({ glassesMode: false })
+    } else {
+      setPrefs({ glassesMode: true })
+      window.location.href = '/glasses'
+    }
+  }
 
   // Sfääri olek oleneb süsteemi olekust
   useEffect(() => {
@@ -113,11 +134,21 @@ export default function App() {
         <div className="header-right">
           <span className="status-dot" style={{ background: statusColor }} />
           <span className="status-text">{status.toUpperCase()}</span>
-          <button onClick={switchToAR} title="Lülitu AR-režiimi (prillid)" style={{
-            background: 'none', border: '1px solid #ffaa0040', color: '#ffaa0088',
-            borderRadius: 5, padding: '2px 8px', cursor: 'pointer',
-            fontSize: '0.65rem', letterSpacing: 1, fontFamily: 'inherit',
-          }}>AR 🥽</button>
+          {/* Glasses Mode toggle — always visible, prominent when XREAL detected */}
+          <button
+            onClick={toggleGlassesMode}
+            title={prefs.glassesMode ? 'Välju Glasses Mode\'ist' : 'Lülita Glasses Mode sisse (XREAL / AR)'}
+            style={{
+              background: prefs.glassesMode ? '#ffaa0025' : isXREALDetected ? '#00aaff20' : 'none',
+              border: `1px solid ${prefs.glassesMode ? '#ffaa0080' : isXREALDetected ? '#00aaff80' : '#ffaa0040'}`,
+              color: prefs.glassesMode ? '#ffaa00' : isXREALDetected ? '#00aaff' : '#ffaa0060',
+              borderRadius: 5, padding: '2px 8px', cursor: 'pointer',
+              fontSize: '0.65rem', letterSpacing: 1, fontFamily: 'inherit',
+              animation: isXREALDetected && !prefs.glassesMode ? 'glassesGlow 1.4s infinite' : 'none',
+            }}
+          >
+            {prefs.glassesMode ? '🥽 GLASSES ON' : isXREALDetected ? '🥽 XREAL' : '🥽'}
+          </button>
         </div>
       </header>
 
@@ -203,6 +234,16 @@ export default function App() {
 
       {/* Kaugjuhtimine */}
       <RemoteDesktop ws={wsRef?.current} onCommand={analyze} />
+
+      {/* XREAL auto-detect banner */}
+      {isXREALDetected && !prefs.glassesMode && (
+        <div style={{ background: '#00aaff12', border: '1px solid #00aaff50', borderRadius: 6, padding: '8px 14px', margin: '0 0 8px', fontSize: '0.8rem', color: '#00aaff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>🥽 XREAL tuvastatud — lülita Glasses Mode sisse täisekraani AR liidese jaoks</span>
+          <button onClick={toggleGlassesMode} style={{ background: '#00aaff20', border: '1px solid #00aaff80', color: '#00aaff', borderRadius: 5, padding: '3px 10px', cursor: 'pointer', fontSize: '0.75rem', marginLeft: 12, fontFamily: 'inherit', letterSpacing: 1 }}>
+            AKTIVEERI
+          </button>
+        </div>
+      )}
 
       {/* Sissetulev sõnum teistelt seadmetelt */}
       {incomingMsg && (

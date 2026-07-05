@@ -19,6 +19,7 @@ const DEFAULTS = {
   subtitlesEnabled:  false,
   notifLevel:        'info',  // silent | info | important | critical
   theme:             'dark',
+  glassesMode:       false,   // XREAL / AR display mode
 }
 
 function load() {
