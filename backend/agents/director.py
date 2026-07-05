@@ -17,7 +17,7 @@ import re
 import json
 import asyncio
 import httpx
-from agents.personality import JARVIS_SYSTEM
+from agents.personality import JARVIS_SYSTEM, build_system
 from core.monitor import audit
 from core.tools import TOOLS, execute_tool, get_cfg
 from core.routing_config import INTENT_PATTERNS, PROVIDERS, ROUTING, FALLBACK_CHAIN
@@ -180,12 +180,18 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
     # Vision Engine — spetsialiseeritud režiim piltide jaoks
     if intent == "vision":
         vision_mode = detect_vision_mode(prompt or "", memory_ctx)
-        system = get_vision_system_prompt(vision_mode, JARVIS_SYSTEM)
+        base_system = get_vision_system_prompt(vision_mode, JARVIS_SYSTEM)
+        system = build_system(mode=None, memory_ctx=memory_ctx, lang=lang, intent=intent)
+        system = base_system + "\n\n" + system  # vision prompt ette
     else:
-        system = JARVIS_SYSTEM
-    if memory_ctx:
-        system += f"\n\n{memory_ctx}"
-    system += f"\n\nDetected language: {lang}. Intent: {intent}. Reply in the same language as the user."
+        # Vali isiksuse moodul intendi järgi
+        mode_map = {
+            "coding":      "coding",
+            "diagnostics": "automotive",
+            "research":    "research",
+        }
+        personality_mode = mode_map.get(intent)
+        system = build_system(mode=personality_mode, memory_ctx=memory_ctx, lang=lang, intent=intent)
 
     ws_commands = []
     primary = routing["primary"]
