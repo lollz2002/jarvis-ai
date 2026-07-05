@@ -352,6 +352,12 @@ def add_project_entry(project_name: str, entry_type: str, content: str):
                   importance=0.8 if entry_type in ("maintenance", "wiring", "part") else 0.5)
     from core.events import emit_sync, MEMORY_UPDATED
     emit_sync(MEMORY_UPDATED, {"type": "project_entry", "project": project_name, "entry_type": entry_type})
+    try:
+        from core.sync import mark_dirty
+        mark_dirty("project_entries", project_name, "upsert",
+                   {"project": project_name, "type": entry_type, "content": content[:200]})
+    except Exception:
+        pass
 
 def get_project_entries(project_name: str, entry_type: str = None) -> list:
     with _conn() as c:

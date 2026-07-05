@@ -56,6 +56,16 @@ async def _load_plugins():
         import logging
         logging.getLogger("server").warning("Runtime kernel start warning: %s", e)
 
+    # Networking Layer + Sync Engine (39_NETWORKING_AND_CLOUD_BIBLE.md)
+    try:
+        from core.networking import networking
+        from core.sync import sync_engine
+        await networking.start_retry_loop(interval_s=60)
+        await sync_engine.start(interval_s=120)
+    except Exception as e:
+        import logging
+        logging.getLogger("server").warning("Networking/Sync start warning: %s", e)
+
 # ── Ühendatud seadmed ──────────────────────────────────────────────────────────
 connected_devices: dict[str, WebSocket] = {}
 
@@ -488,6 +498,24 @@ def api_v1_events(n: int = 50):
     """Viimased N sündmust event bus'ist (debug/monitor)."""
     from core.events import get_history
     return {"events": get_history(n)}
+
+@app.get("/api/v1/network/status")
+async def api_network_status():
+    """Networking Layer olek: online/offline, queue suurus."""
+    from core.networking import networking
+    state = await networking.check_connectivity()
+    return {**networking.status(), "state": state}
+
+@app.post("/api/v1/sync/now")
+async def api_sync_now():
+    """Käivita sünkroniseerimine kohe (spec 39)."""
+    from core.sync import sync_engine
+    return await sync_engine.sync_now()
+
+@app.get("/api/v1/sync/status")
+def api_sync_status():
+    from core.sync import sync_engine, pending_count
+    return {**sync_engine.status(), "pending": pending_count()}
 
 @app.get("/api/v1/runtime/status")
 def api_runtime_status():
