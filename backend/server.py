@@ -209,7 +209,8 @@ async def handle_ws_message(ws: WebSocket, device_id: str, data: dict):
                 return
 
         # 1. Nutikas vastus — direktor valib AI-d, sünteesib
-        primary = await run_primary(image_b64=image_b64, prompt=prompt, mode=mode)
+        model_hint = data.get("model_hint")
+        primary = await run_primary(image_b64=image_b64, prompt=prompt, mode=mode, model_hint=model_hint)
         # Tuvasta brauserikäsklused vastusest
         browser_cmd = _detect_browser_command(prompt)
         audio_b64 = None

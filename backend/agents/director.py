@@ -210,7 +210,7 @@ async def _call_provider(provider: str, prompt: str, image_b64: str, system: str
     return text, ws
 
 # ── Peamine Director ───────────────────────────────────────────────────────────
-async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "") -> tuple[str, list]:
+async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "", model_hint: str = None) -> tuple[str, list]:
     lang   = detect_language(prompt or "")
     intent = classify_intent(prompt or "", bool(image_b64))
     active_project = detect_active_project(prompt or "")
@@ -221,6 +221,13 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
         "has_image": bool(image_b64), "active_project": active_project,
         "prompt_len": len(prompt or ""),
     })
+
+    # ── Kasutaja mudeli eelistus (model_hint seadetest) ───────────────────────
+    if model_hint:
+        _hint_map = {"gpt-4o": "openai", "claude-sonnet-4-6": "claude", "gemini-2.5-flash": "gemini"}
+        hinted = _hint_map.get(model_hint)
+        if hinted and hinted in PROVIDERS and os.getenv(PROVIDERS[hinted]["env_key"], ""):
+            routing = {**routing, "primary": hinted}
 
     # ── Vahemälu kontroll (tekstipäringud, mitte pildid) ──────────────────────
     if not image_b64:

@@ -34,6 +34,7 @@ export default function App() {
   const [showCamera, setShowCamera] = useState(false)
   const [listening, setListening] = useState(false)
   const [muted, setMuted] = useState(false)
+  const [incomingMsg, setIncomingMsg] = useState(null)
   const cameraRef = useRef(null)
   const audioRef = useRef(null)
 
@@ -64,7 +65,10 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (lastMsg) alert(`📨 ${lastMsg.from}: ${lastMsg.text}`)
+    if (lastMsg) {
+      setIncomingMsg(`📨 ${lastMsg.from}: ${lastMsg.text}`)
+      setTimeout(() => setIncomingMsg(null), 8000)
+    }
   }, [lastMsg])
 
   function getCameraFrame() {
@@ -199,6 +203,14 @@ export default function App() {
 
       {/* Kaugjuhtimine */}
       <RemoteDesktop ws={wsRef?.current} onCommand={analyze} />
+
+      {/* Sissetulev sõnum teistelt seadmetelt */}
+      {incomingMsg && (
+        <div style={{ background: '#1a1a1a', border: '1px solid #ffaa0060', borderRadius: 6, padding: '8px 14px', margin: '0 0 8px', fontSize: '0.8rem', color: '#ffaa00', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{incomingMsg}</span>
+          <button onClick={() => setIncomingMsg(null)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+        </div>
+      )}
 
       {/* Tulemused */}
       <Results results={results} loading={loading} audio={audio} />

@@ -609,7 +609,7 @@ function useWeather() {
 
 // ── Peamine HUD ───────────────────────────────────────────────────────────────
 export default function GlassesHUD() {
-  const { status, results, loading, audio, analyze, securityAlert } = useJarvis(getDeviceId())
+  const { status, results, loading, audio, analyze, securityAlert, wsRef } = useJarvis(getDeviceId())
   const { notifs, visible: visibleNotifs, add: addNotif, dismiss, clearAll: clearNotifs } = useNotifications()
   const { device, adapter, layout, profile } = useDeviceManager()
   const { prefs, setPrefs, completeFirstLaunch } = useUserPrefs()
@@ -626,6 +626,20 @@ export default function GlassesHUD() {
     applyWorkspace, applySafeWalking, snapWin, closeAll,
   } = useWindowManager(WIN_DEFS, { jarvis: true, clock: true })
   const [notes, setNotes]             = useState([])
+  // Load persisted notes from backend facts (keys prefixed "note_")
+  useEffect(() => {
+    if (status !== 'online') return
+    fetch(`${BACKEND}/api/v1/memory/facts`)
+      .then(r => r.json())
+      .then(facts => {
+        const saved = Object.entries(facts)
+          .filter(([k]) => k.startsWith('note_'))
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([, v]) => v)
+        if (saved.length) setNotes(saved)
+      })
+      .catch(() => {})
+  }, [status])
   const [subtitles, setSubtitles]     = useState(false)
   const [lastIntent, setLastIntent]   = useState('general')
   const [gestureFeedback, setGestureFeedback] = useState(null) // { text, ts }
@@ -669,7 +683,7 @@ export default function GlassesHUD() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) return
     const r = new SR()
-    r.lang = 'ru-RU'; r.interimResults = true; r.continuous = false
+    r.lang = prefs.preferredLang || 'ru-RU'; r.interimResults = true; r.continuous = false
     r.onstart = () => setListening(true)
     r.onresult = (e) => {
       let itr = '', fin = ''
@@ -706,7 +720,7 @@ export default function GlassesHUD() {
       p.includes('uuri') || p.includes('исследу') || p.includes('research') ? 'research' :
       p.includes('äri') || p.includes('бизнес') ? 'business' : 'general'
     setLastIntent(detectedIntent)
-    analyze({ prompt: text, mode: 'default' })
+    analyze({ prompt: text, mode: 'default', model_hint: prefs.preferredAI })
   }
 
   function applyWs(id) {
@@ -833,7 +847,7 @@ export default function GlassesHUD() {
         {weather && <HUDWidget icon={weather.icon} value={`${weather.temp}°C`} color={C.blue} label={weather.desc} />}
 
         {/* AI Provider */}
-        <HUDWidget icon="🤖" value={status === 'online' ? 'GPT-4o' : '—'} color={C.orange} />
+        <HUDWidget icon="🤖" value={status === 'online' ? (prefs.preferredAI || 'GPT-4o') : '—'} color={C.orange} />
 
         {/* XR seade */}
         {adapter && <HUDWidget icon="🥽" value={adapter.getLabel()} color={C.blue} label={`Profiil: ${profile}`} />}
@@ -936,10 +950,13 @@ export default function GlassesHUD() {
             onSize={size => setWinSize(id, size)}
             onOpacity={o => setWinOpacity(id, o)}
             onSnap={to => snapWin(id, to)}>
-            {id === 'jarvis'   && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} intent={lastIntent} onFollowUp={txt => { setLastIntent(lastIntent); analyze({ prompt: txt, mode: 'default' }) }} />}
+            {id === 'jarvis'   && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} intent={lastIntent} onFollowUp={txt => { setLastIntent(lastIntent); analyze({ prompt: txt, mode: 'default', model_hint: prefs.preferredAI }) }} />}
             {id === 'browser'  && <BrowserPanel />}
-            {id === 'camera'   && <CameraPanel onAnalyze={(img, mode) => analyze({ image: img, mode })} />}
-            {id === 'notes'    && <NotesPanel notes={notes} onAdd={n => setNotes(p => [n, ...p])} />}
+            {id === 'camera'   && <CameraPanel onAnalyze={(img, mode) => analyze({ image: img, mode, model_hint: prefs.preferredAI })} />}
+            {id === 'notes'    && <NotesPanel notes={notes} onAdd={n => {
+              setNotes(p => [n, ...p])
+              wsRef.current?.send(JSON.stringify({ type: 'remember', key: `note_${Date.now()}`, value: n }))
+            }} />}
             {id === 'youtube'  && <YouTubePanel />}
             {id === 'clock'    && <ClockPanel />}
             {id === 'plugins'  && <PluginsPanel />}
