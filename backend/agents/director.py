@@ -37,28 +37,60 @@ def detect_language(text: str) -> str:
     return "ru"
 
 # ── 2. Intent klassifitseerimine ──────────────────────────────────────────────
+# Prioriteetne järjestus: spetsiifilisemad intentid enne üldisemaid
+_INTENT_PRIORITY = [
+    "bmw_diagnostics", "boat_diagnostics", "construction",
+    "vision", "coding", "research", "translation", "planning",
+    "business", "calendar", "device_control", "diagnostics",
+]
+
 def classify_intent(prompt: str, has_image: bool) -> str:
     if has_image:
         return "vision"
     p = prompt.lower()
-    for intent, patterns in INTENT_PATTERNS.items():
-        if intent == "general": continue
-        if any(pat in p for pat in patterns):
+    for intent in _INTENT_PRIORITY:
+        patterns = INTENT_PATTERNS.get(intent, [])
+        if patterns and any(pat in p for pat in patterns):
             return intent
     return "general"
 
-# ── 3. Confidence hinnang ─────────────────────────────────────────────────────
+# ── 3. Aktiivse projekti tuvastus ─────────────────────────────────────────────
+_PROJECT_KEYWORDS = {
+    "bmw":          ["bmw", "бмв", "bmw rike", "bmw viga", "bmw mootor"],
+    "boat":         ["paat", "jaht", "лодк", "яхт", "катер", "boat"],
+    "construction": ["ehitus", "remont", "строительств", "ремонт"],
+}
+
+def detect_active_project(prompt: str) -> str | None:
+    """Tuvastab aktiivse projekti märksõnade järgi. Tagastab projekti nime või None."""
+    p = prompt.lower()
+    for project, keywords in _PROJECT_KEYWORDS.items():
+        if any(kw in p for kw in keywords):
+            return project
+    return None
+
+# ── 4. Confidence hinnang ─────────────────────────────────────────────────────
+_UNCERTAIN_MARKERS = [
+    "не уверен", "возможно", "наверное", "might", "perhaps",
+    "could be", "võib-olla", "arvatavasti", "не знаю", "unclear",
+    "uncertain", "assuming", "i think", "я думаю", "скорее всего",
+]
+
 def estimate_confidence(response: str, intent: str) -> str:
-    """Lihtne heuristika — tegelikus süsteemis võib olla keerukam."""
     if not response or len(response) < 20:
         return "low"
-    uncertain_markers = ["не уверен", "возможно", "наверное", "might", "perhaps",
-                         "could be", "võib-olla", "arvatavasti", "не знаю", "unclear"]
-    if any(m in response.lower() for m in uncertain_markers):
+    if any(m in response.lower() for m in _UNCERTAIN_MARKERS):
         return "medium"
-    if intent in ("research", "diagnostics") and len(response) > 100:
+    if intent in ("research", "diagnostics", "bmw_diagnostics", "boat_diagnostics") and len(response) > 100:
         return "high"
     return "high"
+
+def apply_confidence_label(text: str, confidence: str, lang: str) -> str:
+    """Medium confidence: lisa eelduse märgend vastuse ette."""
+    if confidence != "medium":
+        return text
+    prefix = {"ru": "Предположительно: ", "et": "Eeldatavasti: ", "en": "Assuming: "}.get(lang, "Assuming: ")
+    return prefix + text
 
 # ── Provideri API kutsed ──────────────────────────────────────────────────────
 async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools=True) -> tuple[str | None, list]:
@@ -173,8 +205,9 @@ async def _call_provider(provider: str, prompt: str, image_b64: str, system: str
 
 # ── Peamine Director ───────────────────────────────────────────────────────────
 async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "") -> tuple[str, list]:
-    lang = detect_language(prompt or "")
+    lang   = detect_language(prompt or "")
     intent = classify_intent(prompt or "", bool(image_b64))
+    active_project = detect_active_project(prompt or "")
     routing = ROUTING.get(intent, ROUTING["general"])
 
     # Vision Engine — spetsialiseeritud režiim piltide jaoks
@@ -184,11 +217,15 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
         system = build_system(mode=None, memory_ctx=memory_ctx, lang=lang, intent=intent)
         system = base_system + "\n\n" + system  # vision prompt ette
     else:
-        # Vali isiksuse moodul intendi järgi
+        # Intent → isiksuse moodul kaart
         mode_map = {
-            "coding":      "coding",
-            "diagnostics": "automotive",
-            "research":    "research",
+            "coding":           "coding",
+            "bmw_diagnostics":  "automotive",
+            "boat_diagnostics": "marine",
+            "construction":     "coding",   # tehniline režiim
+            "diagnostics":      "automotive",
+            "research":         "research",
+            "business":         "business",
         }
         personality_mode = mode_map.get(intent)
         system = build_system(mode=personality_mode, memory_ctx=memory_ctx, lang=lang, intent=intent)
@@ -225,38 +262,59 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
             ws_commands.extend(ws)
             if text: break
 
-    # ── Confidence + madala kindluse käsitlemine ──────────────────────────────
+    # ── Confidence strateegia ─────────────────────────────────────────────────
     if text:
         confidence = estimate_confidence(text, intent)
         if confidence == "low" and verify_with and not run_parallel:
+            # Madal kindlus: küsi teiselt providerilt
             verify_text, _ = await _call_provider(verify_with, prompt, image_b64, system)
             if verify_text:
-                text = verify_text  # Eelistame teist arvamust
+                text = verify_text
+                confidence = estimate_confidence(text, intent)
+        # Keskmine kindlus: lisa eelduse märgend
+        text = apply_confidence_label(text, confidence, lang)
+    else:
+        confidence = "low"
 
-    # Vision Engine — salvesta tulemus projekti mällu automaatselt
-    if text and intent == "vision":
+    # ── Mälu uuendus — salvesta projekti mällu pärast vastust ─────────────────
+    if text:
         try:
-            proj, entry_type = should_save_to_project(vision_mode if intent == "vision" else "general", text)
-            if proj and entry_type:
-                from memory.memory import add_project_entry
-                add_project_entry(proj, entry_type, f"[Vision] {(prompt or '')[:60]} → {text[:200]}")
+            from memory.memory import add_project_entry
+            if intent == "vision":
+                proj, entry_type = should_save_to_project(
+                    vision_mode if intent == "vision" else "general", text)
+                if proj and entry_type:
+                    add_project_entry(proj, entry_type,
+                                      f"[Vision] {(prompt or '')[:60]} → {text[:200]}")
+            elif active_project and intent in (
+                "bmw_diagnostics", "boat_diagnostics", "construction", "diagnostics"
+            ):
+                # Salvesta diagnostika tulemus aktiivse projekti alla
+                add_project_entry(active_project, "diagnosis",
+                                  f"[{intent}] {(prompt or '')[:80]} → {text[:300]}")
         except Exception:
             pass
 
-    audit("director_response", {"intent": intent, "provider": primary, "has_text": bool(text)})
+    audit("director_response", {
+        "intent": intent, "provider": primary,
+        "has_text": bool(text), "confidence": confidence,
+        "active_project": active_project, "lang": lang,
+    })
     return text or "Все системы недоступны, сэр.", ws_commands
 
 
 async def decide_routing(prompt: str, has_image: bool) -> dict:
-    intent = classify_intent(prompt, has_image)
-    lang = detect_language(prompt)
-    routing = ROUTING.get(intent, ROUTING["general"])
+    intent         = classify_intent(prompt, has_image)
+    lang           = detect_language(prompt)
+    active_project = detect_active_project(prompt)
+    routing        = ROUTING.get(intent, ROUTING["general"])
     return {
-        "intent": intent,
-        "language": lang,
+        "intent":           intent,
+        "language":         lang,
+        "active_project":   active_project,
         "primary_provider": routing["primary"],
-        "verify_with": routing["verify_with"],
-        "parallel": routing.get("parallel", False),
+        "verify_with":      routing["verify_with"],
+        "parallel":         routing.get("parallel", False),
     }
 
 
