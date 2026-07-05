@@ -77,9 +77,15 @@ const WIN_DEFS = {
 }
 
 // ── Ujuv aken ─────────────────────────────────────────────────────────────────
-function FloatWin({ winState, title, icon, children, onClose, onMinimize, onMaximize, onPin, onFocus, onPos, onSize, onOpacity, focused }) {
+function FloatWin({ winState, title, icon, children, onClose, onMinimize, onMaximize, onPin, onFocus, onPos, onSize, onOpacity, onSnap, focused }) {
   const drag = useRef(null)
   const rsz  = useRef(null)
+  const [closing, setClosing] = useState(false)
+
+  function handleClose() {
+    setClosing(true)
+    setTimeout(() => { setClosing(false); onClose() }, 180)
+  }
 
   if (!winState?.open) return null
 
@@ -122,7 +128,7 @@ function FloatWin({ winState, title, icon, children, onClose, onMinimize, onMaxi
         opacity,
         display: 'flex', flexDirection: 'column',
         transition: 'height 0.2s, opacity 0.15s, border-color 0.15s, width 0.2s, left 0.2s, top 0.2s',
-        animation: 'winOpen 0.2s ease',
+        animation: closing ? 'winClose 0.18s ease forwards' : 'winOpen 0.2s ease',
         zIndex,
       }}
     >
@@ -140,10 +146,11 @@ function FloatWin({ winState, title, icon, children, onClose, onMinimize, onMaxi
         {pinned && <span style={{ fontSize: 9, color: C.blue, marginRight: 4 }}>📌</span>}
         <div className="wc" style={{ display: 'flex', gap: 5 }}>
           <WBtn onClick={() => onOpacity(opacity > 0.6 ? 0.3 : 0.95)} title="Läbipaistvus">◑</WBtn>
+          {onSnap && <SnapMenu onSnap={onSnap} />}
           <WBtn onClick={onPin} title={pinned ? 'Vabasta' : 'Kinnita'} color={pinned ? C.blue : undefined}>📌</WBtn>
           <WBtn onClick={onMaximize} title={maximized ? 'Taasta' : 'Maksimeeri'}>{maximized ? '❐' : '□'}</WBtn>
           <WBtn onClick={onMinimize}>{minimized ? '▲' : '–'}</WBtn>
-          <WBtn onClick={onClose} color={C.red}>✕</WBtn>
+          <WBtn onClick={handleClose} color={C.red}>✕</WBtn>
         </div>
       </div>
       {/* Sisu — lazy: ei renderdeta minimeeritud akende sisu */}
@@ -164,8 +171,50 @@ function WBtn({ onClick, children, color, title }) {
   }}>{children}</button>
 }
 
+// Snap menu — aseta aken ekraani servale/nurka
+function SnapMenu({ onSnap }) {
+  const [open, setOpen] = useState(false)
+  const SNAPS = [
+    ['tl','↖'],['top','↑'],['tr','↗'],
+    ['left','←'],['center','·'],['right','→'],
+    ['bl','↙'],['br','↘'],
+  ]
+  return (
+    <div style={{ position: 'relative' }}>
+      <WBtn onClick={() => setOpen(v => !v)} title="Snap">⊞</WBtn>
+      {open && (
+        <div onMouseLeave={() => setOpen(false)} style={{
+          position: 'absolute', top: 18, right: 0,
+          background: '#111', border: `1px solid ${C.border}`,
+          borderRadius: 6, padding: 4, zIndex: 999,
+          display: 'grid', gridTemplateColumns: 'repeat(3,22px)', gap: 2,
+        }}>
+          {SNAPS.map(([pos, label]) => (
+            <button key={pos} onClick={() => { onSnap(pos); setOpen(false) }} style={{
+              background: 'none', border: `1px solid ${C.border}`, color: C.textDim,
+              borderRadius: 3, cursor: 'pointer', fontSize: 11, padding: '2px 0',
+              fontFamily: font, textAlign: 'center',
+            }}>{label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Akende sisud ──────────────────────────────────────────────────────────────
-function JarvisPanel({ results, loading, interim, sphereState }) {
+const FOLLOWUP_SHORTCUTS = {
+  bmw_diagnostics:  ['Mis osad vajan?', 'Näita skeem', 'Mitu see maksab?'],
+  boat_diagnostics: ['Hooldusplaan', 'Varuosad', 'Ohutussoovitused'],
+  coding:           ['Refaktori', 'Lisa testid', 'Selgita lähemalt'],
+  research:         ['Kokkuvõte', 'Allikad', 'Võrdle alternatiividega'],
+  general:          ['Selgita lähemalt', 'Järgmine samm', 'Salvesta mällu'],
+}
+
+function JarvisPanel({ results, loading, interim, sphereState, onFollowUp, intent }) {
+  const shortcuts = FOLLOWUP_SHORTCUTS[intent] || FOLLOWUP_SHORTCUTS.general
+  const hasResponse = results?.[0]?.response && !loading
+
   return (
     <div style={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
@@ -176,9 +225,21 @@ function JarvisPanel({ results, loading, interim, sphereState }) {
       </div>
       {interim && <div style={{ fontSize: 12, color: C.yellow, fontStyle: 'italic', textAlign: 'center' }}>"{interim}"</div>}
       {loading && <div style={{ color: C.blue, fontSize: 11, textAlign: 'center' }}>⏳</div>}
-      {results?.[0]?.response && !loading && (
+      {hasResponse && (
         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.65, fontFamily: 'system-ui', overflow: 'auto', flex: 1 }}>
           {results[0].response}
+        </div>
+      )}
+      {/* Follow-up shortcuts — näita vastuse järel */}
+      {hasResponse && onFollowUp && (
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap' }}>
+          {shortcuts.map(s => (
+            <button key={s} onClick={() => onFollowUp(s)} style={{
+              background: `${C.orange}12`, border: `1px solid ${C.orange}40`,
+              color: C.orange, borderRadius: 12, padding: '3px 8px',
+              fontSize: 9, fontFamily: font, cursor: 'pointer', letterSpacing: 0.5,
+            }}>{s}</button>
+          ))}
         </div>
       )}
     </div>
@@ -204,7 +265,9 @@ function BrowserPanel() {
 function CameraPanel({ onAnalyze }) {
   const vRef  = useRef(null)
   const cvRef = useRef(null)
-  const [snap, setSnap] = useState(null)
+  const [snap, setSnap]     = useState(null)
+  const [snap2, setSnap2]   = useState(null)   // Compare: teine pilt
+  const [compare, setCompare] = useState(false)
   const [status, setCameraStatus] = useState('starting')
 
   useEffect(() => {
@@ -231,22 +294,46 @@ function CameraPanel({ onAnalyze }) {
     fontFamily: font, cursor: 'pointer', letterSpacing: 1,
   })
 
+  function captureCompare() {
+    const b = capture()
+    if (!b) return
+    setSnap2(b)
+    setCompare(true)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#000' }}>
-      <div style={{ position: 'relative', flex: 1 }}>
-        <video ref={vRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: snap ? 'none' : 'block' }} />
-        {snap && <img src={`data:image/jpeg;base64,${snap}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="snap" />}
-        <div style={{ position: 'absolute', top: 4, right: 6, fontSize: 8, letterSpacing: 2, fontFamily: font,
-          color: status === 'live' ? C.red : C.textDim }}>
-          {status === 'live' ? '● LIVE' : status === 'error' ? '✖ VIGA' : '○ ...'}
+      {/* Võrdlusrežiim: kaks pilti kõrvuti */}
+      {compare && snap && snap2 ? (
+        <div style={{ flex: 1, display: 'flex', gap: 2 }}>
+          <div style={{ flex: 1, position: 'relative' }}>
+            <img src={`data:image/jpeg;base64,${snap}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="A" />
+            <div style={{ position: 'absolute', top: 4, left: 6, fontSize: 8, color: C.orange, fontFamily: font, letterSpacing: 1, background: '#000a', padding: '1px 5px', borderRadius: 3 }}>A</div>
+          </div>
+          <div style={{ flex: 1, position: 'relative' }}>
+            <img src={`data:image/jpeg;base64,${snap2}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="B" />
+            <div style={{ position: 'absolute', top: 4, left: 6, fontSize: 8, color: C.blue, fontFamily: font, letterSpacing: 1, background: '#000a', padding: '1px 5px', borderRadius: 3 }}>B</div>
+          </div>
         </div>
-        {snap && <button onClick={() => setSnap(null)} style={{ position: 'absolute', top: 4, left: 6, background: '#000a', border: 'none', color: C.textDim, fontSize: 9, cursor: 'pointer', borderRadius: 3, padding: '2px 6px' }}>✕ LIVE</button>}
-      </div>
-      <div style={{ display: 'flex', gap: 4, padding: '6px 6px', background: '#ffffff06', borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+      ) : (
+        <div style={{ position: 'relative', flex: 1 }}>
+          <video ref={vRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: snap ? 'none' : 'block' }} />
+          {snap && <img src={`data:image/jpeg;base64,${snap}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="snap" />}
+          <div style={{ position: 'absolute', top: 4, right: 6, fontSize: 8, letterSpacing: 2, fontFamily: font,
+            color: status === 'live' ? C.red : C.textDim }}>
+            {status === 'live' ? '● LIVE' : status === 'error' ? '✖ VIGA' : '○ ...'}
+          </div>
+          {snap && <button onClick={() => { setSnap(null); setCompare(false) }} style={{ position: 'absolute', top: 4, left: 6, background: '#000a', border: 'none', color: C.textDim, fontSize: 9, cursor: 'pointer', borderRadius: 3, padding: '2px 6px' }}>✕ LIVE</button>}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 4, padding: '6px 6px', background: '#ffffff06', borderTop: `1px solid ${C.border}`, flexShrink: 0, flexWrap: 'wrap' }}>
         <button style={btnStyle(C.orange)} onClick={capture}>📷 JÄÄDV</button>
         <button style={btnStyle(C.blue)}   onClick={() => { const b = capture(); if (b && onAnalyze) onAnalyze(b, 'analyze') }}>🔍 ANALÜÜS</button>
         <button style={btnStyle(C.green)}  onClick={() => { const b = capture(); if (b && onAnalyze) onAnalyze(b, 'translate') }}>🌐 TÕLGI</button>
         <button style={btnStyle(C.yellow)} onClick={() => { const b = capture(); if (b && onAnalyze) onAnalyze(b, 'identify') }}>🏷 MIS?</button>
+        {/* Compare: jäädvusta 2. pilt ja näita kõrvuti */}
+        {snap && <button style={btnStyle(C.textDim)} onClick={captureCompare}>⊞ VÕRDL</button>}
+        {compare && <button style={btnStyle(C.red)} onClick={() => { setCompare(false); setSnap2(null) }}>✕ VÕRDL</button>}
         <button style={btnStyle(C.textDim)} onClick={() => { if (snap) { const a = document.createElement('a'); a.href = `data:image/jpeg;base64,${snap}`; a.download = `albert_${Date.now()}.jpg`; a.click() } }}>💾 SALVESTA</button>
       </div>
     </div>
@@ -536,10 +623,11 @@ export default function GlassesHUD() {
     wins, focusedId,
     openWin, closeWin, minimizeWin, maximizeWin, pinWin, focus,
     setWinPos, setWinSize, setWinOpacity,
-    applyWorkspace, applySafeWalking, closeAll,
+    applyWorkspace, applySafeWalking, snapWin, closeAll,
   } = useWindowManager(WIN_DEFS, { jarvis: true, clock: true })
   const [notes, setNotes]             = useState([])
   const [subtitles, setSubtitles]     = useState(false)
+  const [lastIntent, setLastIntent]   = useState('general')
   const [gestureFeedback, setGestureFeedback] = useState(null) // { text, ts }
   const recogRef  = useRef(null)
   const activeRef = useRef(false)
@@ -610,6 +698,14 @@ export default function GlassesHUD() {
     if (t.includes('заметки') || t.includes('märkmed')) return openWin('notes')
     if (t.includes('закрой всё') || t.includes('sulge kõik')) return closeAll()
     // JARVIS
+    const p = text.toLowerCase()
+    const detectedIntent =
+      p.includes('bmw') || p.includes('бмв') ? 'bmw_diagnostics' :
+      p.includes('paat') || p.includes('лодк') ? 'boat_diagnostics' :
+      p.includes('kood') || p.includes('код') || p.includes('function') ? 'coding' :
+      p.includes('uuri') || p.includes('исследу') || p.includes('research') ? 'research' :
+      p.includes('äri') || p.includes('бизнес') ? 'business' : 'general'
+    setLastIntent(detectedIntent)
     analyze({ prompt: text, mode: 'default' })
   }
 
@@ -838,8 +934,9 @@ export default function GlassesHUD() {
             onFocus={() => focus(id)}
             onPos={pos => setWinPos(id, pos)}
             onSize={size => setWinSize(id, size)}
-            onOpacity={o => setWinOpacity(id, o)}>
-            {id === 'jarvis'   && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} />}
+            onOpacity={o => setWinOpacity(id, o)}
+            onSnap={to => snapWin(id, to)}>
+            {id === 'jarvis'   && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} intent={lastIntent} onFollowUp={txt => { setLastIntent(lastIntent); analyze({ prompt: txt, mode: 'default' }) }} />}
             {id === 'browser'  && <BrowserPanel />}
             {id === 'camera'   && <CameraPanel onAnalyze={(img, mode) => analyze({ image: img, mode })} />}
             {id === 'notes'    && <NotesPanel notes={notes} onAdd={n => setNotes(p => [n, ...p])} />}
@@ -913,7 +1010,7 @@ export default function GlassesHUD() {
           { id: 'youtube', icon: '▶',  label: 'YouTube'  },
           { id: 'clock',   icon: '🕐', label: 'Kell'    },
         ].map(({ id, icon, label }) => (
-          <button key={id} onClick={() => openWin(id)} style={{
+          <button key={id} tabIndex={0} onKeyDown={e => e.key === 'Enter' && openWin(id)} onClick={() => openWin(id)} style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
             background: wins[id]?.open ? `${C.orange}20` : 'none',
             border: `1px solid ${wins[id]?.open ? C.orange : C.border}`,
@@ -979,10 +1076,11 @@ export default function GlassesHUD() {
       </div>
 
       <style>{`
-        @keyframes fadeIn  { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
-        @keyframes winOpen { from { opacity: 0; transform: scale(0.95) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-        @keyframes blink   { 50% { opacity: 0.2; } }
-        @keyframes pulse   { 50% { opacity: 0.4; } }
+        @keyframes fadeIn    { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+        @keyframes winOpen   { from { opacity: 0; transform: scale(0.95) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        @keyframes winClose  { from { opacity: 1; transform: scale(1) translateY(0); } to { opacity: 0; transform: scale(0.95) translateY(6px); } }
+        @keyframes blink     { 50% { opacity: 0.2; } }
+        @keyframes pulse     { 50% { opacity: 0.4; } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 3px; }
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 2px; }
