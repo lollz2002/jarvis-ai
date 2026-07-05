@@ -643,6 +643,175 @@ def delete_all_memory(confirm: str = ""):
             c.execute(f"DELETE FROM {t}")
     return {"ok": True, "deleted_tables": tables}
 
+# ── Mälukande taastamine (reverse of archive) ─────────────────────────────────
+def restore_memory(memory_id: int):
+    """Taastab arhiveeritud mälukande — eemaldab 'archived:' prefiksi, tõstab skoori."""
+    with _conn() as c:
+        row = c.execute("SELECT category, importance_score FROM memory_index WHERE id=?",
+                        (memory_id,)).fetchone()
+        if not row:
+            return False
+        cat = row["category"]
+        if cat.startswith("archived:"):
+            cat = cat[len("archived:"):]
+        new_score = min(1.0, row["importance_score"] + 0.2)
+        c.execute(
+            "UPDATE memory_index SET category=?, importance_score=?, updated_at=? WHERE id=?",
+            (cat, new_score, datetime.now().isoformat(), memory_id)
+        )
+    return True
+
+# ── Faktide muutmine ──────────────────────────────────────────────────────────
+def edit_fact(key: str, new_value: str):
+    """Kasutaja saab olemasolevat fakti muuta."""
+    with _conn() as c:
+        existing = c.execute("SELECT key FROM facts WHERE key=?", (key,)).fetchone()
+        if not existing:
+            return False
+        c.execute("UPDATE facts SET value=?, updated_at=? WHERE key=?",
+                  (new_value, datetime.now().isoformat(), key))
+    return True
+
+# ── Project Brain — eelinitialiseeritud projektiruumid ────────────────────────
+_DEFAULT_PROJECTS = [
+    {
+        "name":        "BMW",
+        "description": "BMW diagnostika, remont, osad, elektriskeemid, hooldus",
+        "status":      "active",
+        "notes":       "Peamine sõiduk",
+    },
+    {
+        "name":        "Paat",
+        "description": "Paadi hooldus, mootor, elektroonika, navigatsioon, meresõit",
+        "status":      "active",
+        "notes":       "Mereekspeditsioonid",
+    },
+    {
+        "name":        "Äri",
+        "description": "Kliendid, tarnijad, hinnapakkumised, lepingud, ülesanded",
+        "status":      "active",
+        "notes":       "Äriprojektid",
+    },
+    {
+        "name":        "Kood",
+        "description": "Repositooriumid, arhitektuur, API-d, dokumentatsioon, Albert OS",
+        "status":      "active",
+        "notes":       "Programmeerimisprojektid",
+    },
+    {
+        "name":        "Isiklik",
+        "description": "Isiklikud eesmärgid, tervis, pere, hobid",
+        "status":      "active",
+        "notes":       "",
+    },
+]
+
+def init_project_brain():
+    """
+    Initsialiseerib Project Brain — loob vaikimisi projektiruumid kui need puuduvad.
+    Ohutult korduvkutsutav (INSERT OR IGNORE).
+    """
+    for proj in _DEFAULT_PROJECTS:
+        with _conn() as c:
+            exists = c.execute("SELECT id FROM projects WHERE name=?", (proj["name"],)).fetchone()
+            if not exists:
+                save_project(
+                    name=proj["name"],
+                    description=proj["description"],
+                    notes=proj["notes"],
+                    status=proj["status"],
+                )
+                # Lisa teadmistebaasi kategooriad vastavalt projekti domeenile
+                domain_knowledge = {
+                    "BMW":     [("checklist", "BMW diagnostika protokoll", "1. OBD skaneerimine 2. Visuaalne kontroll 3. Elektriskeemid 4. Testimine")],
+                    "Paat":    [("checklist", "Paadi hooajaalguse kontrollnimekiri", "Mootor, akud, navigatsioon, päästevarustus, fuel")],
+                    "Äri":     [("workflow", "Hinnapakkumise protsess", "1. Kliendi vajadused 2. Kalkulatsioon 3. Pakkumine 4. Leping")],
+                    "Kood":    [("workflow", "Feature arenduse protsess", "Branch → implement → test → review → merge → deploy")],
+                    "Isiklik": [],
+                }
+                for cat, title, content in domain_knowledge.get(proj["name"], []):
+                    add_knowledge(title, content, category=cat, project=proj["name"])
+
+# ── Context Builder tokenipiirang ─────────────────────────────────────────────
+def get_context_for_prompt(prompt: str = "", max_chars: int = 3000) -> str:
+    """
+    Pipeline: intent detect → project → knowledge → facts → contacts → notes → recent
+    Ranked by importance, truncated to max_chars to avoid prompt overload.
+    """
+    parts = []
+    active_project = detect_active_project(prompt) if prompt else None
+
+    # 1. Faktid (kõrge prioriteet)
+    facts = get_all_facts()
+    if facts:
+        parts.append("ИЗВЕСТНЫЕ ФАКТЫ:")
+        for k, v in list(facts.items())[:10]:
+            parts.append(f"  {k}: {v}")
+
+    # 2. Kontaktid
+    contacts = get_all_contacts()
+    if contacts:
+        parts.append("\nКОНТАКТЫ:")
+        for ct in contacts[:15]:
+            line = f"  {ct['name']}"
+            if ct['phone']: line += f" тел:{ct['phone']}"
+            if ct['email']: line += f" email:{ct['email']}"
+            parts.append(line)
+
+    # 3. Aktiivsed projektid (lühiloend)
+    projects = get_projects("active")
+    if projects:
+        parts.append("\nАКТИВНЫЕ ПРОЕКТЫ:")
+        for p in projects[:6]:
+            parts.append(f"  [{p['name']}] {p['description'][:80]}")
+
+    # 4. Aktiivse projekti detailid (kõrgeim prioriteet)
+    if active_project:
+        entries = get_project_entries(active_project)
+        if entries:
+            parts.append(f"\nАКТИВНЫЙ ПРОЕКТ — {active_project}:")
+            for e in entries[:8]:
+                parts.append(f"  [{e['entry_type']}] {e['content'][:100]}")
+        milestones = get_milestones(active_project)
+        if milestones:
+            parts.append(f"  VERSTAPOSTID:")
+            for m in milestones[:4]:
+                parts.append(f"    ○ {m['title']}")
+        kbs = search_knowledge(prompt[:60] if prompt else active_project, project=active_project)
+        if kbs:
+            parts.append(f"  TEADMISTEBAAS:")
+            for kb in kbs[:3]:
+                parts.append(f"    [{kb['category']}] {kb['title']}: {kb['content'][:80]}")
+    elif prompt:
+        kbs = search_knowledge(prompt[:60])
+        if kbs:
+            parts.append("\nTEADMISTEBAAS:")
+            for kb in kbs[:3]:
+                parts.append(f"  [{kb['category']}] {kb['title']}: {kb['content'][:80]}")
+
+    # 5. Viimased märkmed
+    recent_notes = get_recent_notes(3)
+    if recent_notes:
+        parts.append("\nПОСЛЕДНИЕ ЗАМЕТКИ:")
+        for n in recent_notes:
+            parts.append(f"  {n['content'][:100]}")
+
+    # 6. Viimased vestlused (piiratud)
+    recent = get_recent(4)
+    if recent:
+        parts.append("\nПОСЛЕДНИЕ РАЗГОВОРЫ:")
+        for r in recent:
+            parts.append(f"  Q: {r['prompt'][:80]}")
+            parts.append(f"  A: {r['response'][:80]}")
+
+    ctx = "\n".join(parts) if parts else ""
+
+    # Tokenipiirang — lõika max_chars juures et vältida prompti ülekoormust
+    if len(ctx) > max_chars:
+        ctx = ctx[:max_chars] + "\n[...kontekst lühendatud...]"
+
+    return ctx
+
 # ── Prefs (backwards compat) ──────────────────────────────────────────────────
 def save_pref(key: str, value):
     save_fact(f"pref_{key}", str(value))

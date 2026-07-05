@@ -41,6 +41,13 @@ async def _load_plugins():
         import logging
         logging.getLogger("server").warning(f"Plugin load viga: {e}")
 
+    # Project Brain — initsialiseerib vaikimisi projektiruumid
+    try:
+        from memory.memory import init_project_brain
+        init_project_brain()
+    except Exception:
+        pass
+
 # ── Ühendatud seadmed ──────────────────────────────────────────────────────────
 connected_devices: dict[str, WebSocket] = {}
 
@@ -311,6 +318,34 @@ def memory_archive(memory_id: int):
     from memory.memory import archive_memory
     archive_memory(memory_id)
     return {"ok": True, "id": memory_id}
+
+@app.post("/api/v1/memory/restore/{memory_id}")
+def memory_restore(memory_id: int):
+    from memory.memory import restore_memory
+    ok = restore_memory(memory_id)
+    return {"ok": ok, "id": memory_id}
+
+@app.put("/api/v1/memory/facts/{key}")
+async def memory_edit_fact(key: str, request: Request):
+    from memory.memory import edit_fact
+    body = await request.json()
+    ok = edit_fact(key, body.get("value", ""))
+    return {"ok": ok, "key": key}
+
+@app.get("/api/v1/memory/index")
+async def memory_index(q: str = "", project: str = None, include_archived: bool = False):
+    from memory.memory import search_memory_index
+    return search_memory_index(q, project or None, include_archived=include_archived)
+
+@app.get("/api/v1/memory/projects/{name}/entries")
+def memory_project_entries(name: str, entry_type: str = None):
+    from memory.memory import get_project_entries
+    return get_project_entries(name, entry_type or None)
+
+@app.get("/api/v1/memory/projects/{name}/milestones")
+def memory_project_milestones(name: str):
+    from memory.memory import get_milestones
+    return get_milestones(name, include_done=True)
 
 @app.get("/health")
 def health():
