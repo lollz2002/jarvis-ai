@@ -105,6 +105,23 @@ export function useXRSession({ currentProfile, currentWorkspace, wins, onRestore
 }
 
 /**
+ * useXRFeatures — runtime feature detection (37_ANDROID_XR_IMPLEMENTATION_BIBLE.md)
+ * Kontrollib mis XR võimalused on seadmel saadaval.
+ * Toetamata funktsioonid keelatakse automaatselt.
+ */
+export function useXRFeatures() {
+  const [features, setFeatures] = useState(null)
+
+  useEffect(() => {
+    import('../adapters/XRAdapter.js').then(({ detectXRFeatures }) => {
+      detectXRFeatures().then(setFeatures)
+    })
+  }, [])
+
+  return features   // null kuni tuvastamine lõpeb
+}
+
+/**
  * useFPS — lihtne FPS hook teistele komponentidele
  */
 export function useFPS() {
