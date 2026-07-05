@@ -284,6 +284,34 @@ async def memory_update_profile(request: Request):
     update_user_profile(**body)
     return {"ok": True}
 
+@app.get("/api/v1/memory/projects")
+def memory_projects(status: str = "active"):
+    from memory.memory import get_projects
+    return get_projects(status)
+
+@app.get("/api/v1/memory/facts")
+def memory_facts():
+    from memory.memory import get_all_facts
+    return get_all_facts()
+
+@app.post("/api/v1/memory/forget")
+async def memory_forget(request: Request):
+    from memory.memory import forget_fact
+    body = await request.json()
+    forget_fact(body["key"])
+    return {"ok": True}
+
+@app.get("/api/v1/memory/search")
+async def memory_search(q: str = "", project: str = None):
+    from memory.memory import search_all_memory
+    return search_all_memory(q, project or None)
+
+@app.post("/api/v1/memory/archive/{memory_id}")
+def memory_archive(memory_id: int):
+    from memory.memory import archive_memory
+    archive_memory(memory_id)
+    return {"ok": True, "id": memory_id}
+
 @app.get("/health")
 def health():
     return {"ok": True, "devices": len(connected_devices)}

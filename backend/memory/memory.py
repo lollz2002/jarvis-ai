@@ -165,6 +165,21 @@ def _init():
 
 _init()
 
+# Migratsioon: lisa uued veerud olemasolevasse DB-sse
+def _migrate():
+    with _conn() as c:
+        for col, definition in [
+            ("access_count", "INTEGER DEFAULT 0"),
+            ("confidence",   "TEXT DEFAULT 'high'"),
+            ("summary",      "TEXT DEFAULT ''"),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE memory_index ADD COLUMN {col} {definition}")
+            except Exception:
+                pass  # veerg juba eksisteerib
+
+_migrate()
+
 # ── Kasutajaprofiil ───────────────────────────────────────────────────────────
 def get_user_profile() -> dict:
     with _conn() as c:
@@ -317,15 +332,50 @@ def _index_memory(title: str, category: str, project: str = "", importance: floa
     """Registreerib mälukande indeksisse — automaatne."""
     now = datetime.now().isoformat()
     with _conn() as c:
-        c.execute("""INSERT INTO memory_index
-            (title,category,project,importance_score,source_table,source_id,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?)""",
-            (title[:120], category, project, importance, source_table, source_id, now, now))
+        # Uuenda olemasolevat, ära loo duplikaati
+        existing = c.execute(
+            "SELECT id, importance_score, access_count FROM memory_index WHERE title=? AND category=?",
+            (title[:120], category)
+        ).fetchone()
+        if existing:
+            new_importance = min(1.0, existing["importance_score"] + 0.05)
+            new_count = (existing["access_count"] or 0) + 1
+            c.execute(
+                "UPDATE memory_index SET importance_score=?, access_count=?, updated_at=? WHERE id=?",
+                (new_importance, new_count, now, existing["id"])
+            )
+        else:
+            c.execute("""INSERT INTO memory_index
+                (title,category,project,importance_score,source_table,source_id,created_at,updated_at,access_count)
+                VALUES (?,?,?,?,?,?,?,?,0)""",
+                (title[:120], category, project, importance, source_table, source_id, now, now))
 
-def search_memory_index(query: str, project: str = None, min_importance: float = 0.0) -> list:
+def update_importance(memory_id: int, delta: float):
+    """Tõsta või vähenda mälukande tähtsust. delta: +0.1 reused, -0.2 archived."""
+    with _conn() as c:
+        c.execute("""UPDATE memory_index
+            SET importance_score = MAX(0.0, MIN(1.0, importance_score + ?)),
+                updated_at = ?
+            WHERE id=?""",
+            (delta, datetime.now().isoformat(), memory_id))
+
+def archive_memory(memory_id: int):
+    """Arhiveerib mälukande — vähendab tähtsust, jääb otsitavaks."""
+    with _conn() as c:
+        c.execute("""UPDATE memory_index
+            SET category = 'archived:' || category,
+                importance_score = MAX(0.1, importance_score - 0.3),
+                updated_at = ?
+            WHERE id=?""",
+            (datetime.now().isoformat(), memory_id))
+
+def search_memory_index(query: str, project: str = None, min_importance: float = 0.0,
+                        include_archived: bool = False) -> list:
     with _conn() as c:
         base = "SELECT * FROM memory_index WHERE (title LIKE ? OR category LIKE ?)"
         params = [f"%{query}%", f"%{query}%"]
+        if not include_archived:
+            base += " AND category NOT LIKE 'archived:%'"
         if project:
             base += " AND (project=? OR project='')"
             params.append(project)
@@ -334,6 +384,16 @@ def search_memory_index(query: str, project: str = None, min_importance: float =
             params.append(min_importance)
         base += " ORDER BY importance_score DESC, updated_at DESC LIMIT 15"
         return [dict(r) for r in c.execute(base, params).fetchall()]
+
+def search_all_memory(query: str, project: str = None) -> dict:
+    """Otsi üle kõigi mälukihtide — kasutajakäsk 'search memory'."""
+    return {
+        "facts":         [(k, v) for k, v in get_all_facts().items()
+                          if query.lower() in k.lower() or query.lower() in v.lower()],
+        "knowledge":     search_knowledge(query, project=project),
+        "notes":         search_notes(query, project=project),
+        "index":         search_memory_index(query, project=project),
+    }
 
 # ── Kontaktid ─────────────────────────────────────────────────────────────────
 def save_contact(name: str, phone: str = "", email: str = "", notes: str = ""):
