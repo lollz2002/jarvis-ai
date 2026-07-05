@@ -44,8 +44,10 @@ export function useDeviceManager() {
     const isTablet    = /ipad/.test(ua) || (isMobile && w > 768)
 
     const urlAR  = new URLSearchParams(window.location.search).get('ar') === '1'
-    const isXREAL = urlAR || (isLandscape && ratio > 1.6 && isMobile)
     const isGlassesRoute = window.location.pathname === '/glasses'
+    // XREAL Air 2 Ultra: 1920×1080 on a non-mobile host (PC/Mac via USB-C)
+    const isXREAL_screen = !isMobile && window.screen.width === 1920 && window.screen.height === 1080
+    const isXREAL = urlAR || isGlassesRoute || isXREAL_screen || (isLandscape && ratio > 1.6 && isMobile)
 
     // Väline monitor: window.screen vs window.innerWidth erinevus
     const hasExternalDisplay = typeof window.screen !== 'undefined' &&

@@ -669,6 +669,15 @@ export default function GlassesHUD() {
     if (status === 'disconnected') addNotif('Ühendus katkes — taasühendan...', 'important')
   }, [status])
 
+  // XREAL: auto-skip wizard with glasses-optimal defaults (workshop = jarvis+camera+browser)
+  useEffect(() => {
+    if (!prefs.firstLaunchDone && (profile === 'xreal' || window.location.pathname === '/glasses')) {
+      setPrefs({ preferredLang: prefs.preferredLang || 'ru-RU', preferredAI: prefs.preferredAI || 'gpt-4o', favoriteWorkspace: 'workshop' })
+      completeFirstLaunch()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile])
+
   // Päevakäivitus: taasta eelmine workspace eelistustest
   useEffect(() => {
     if (prefs.firstLaunchDone && prefs.favoriteWorkspace && WORKSPACES[prefs.favoriteWorkspace]) {
@@ -794,7 +803,10 @@ export default function GlassesHUD() {
   // Safety context sünkroniseerimine workspace-ga
   useEffect(() => { setSafetyContext(ws) }, [ws])
 
+  const isXREAL     = profile === 'xreal'
   const statusColor = { online: C.green, connecting: C.yellow, disconnected: C.red }[status]
+  // XREAL: scale all text up 1.25× — optical see-through at ~2m needs larger glyphs
+  const xrScale     = isXREAL ? 1.25 : 1
 
   // Aku tase (simuleeritud — päris iOS Battery API vajab native appi)
   const [battery, setBattery] = useState(null)
@@ -816,8 +828,11 @@ export default function GlassesHUD() {
     return <FirstLaunchWizard onComplete={completeFirstLaunch} setPrefs={setPrefs} />
   }
 
+  // XREAL: narrower side panel to give more window space
+  const leftW = isXREAL ? 140 : 200
+
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#000', overflow: 'hidden', position: 'relative', fontFamily: font }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#000', overflow: 'hidden', position: 'relative', fontFamily: font, fontSize: `${xrScale}em` }}>
       {/* Taust-grid */}
       <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', opacity: 0.4 }}>
         <defs><pattern id="g" width="60" height="60" patternUnits="userSpaceOnUse"><path d="M60 0L0 0 0 60" fill="none" stroke="#ffffff08" strokeWidth="0.5"/></pattern></defs>
@@ -883,17 +898,19 @@ export default function GlassesHUD() {
       {/* ══ VASAKPANEEL — Notifid + Aktiivne projekt ══════════════════════════ */}
       <div style={{
         position: 'absolute', top: 44, left: 0, bottom: 52,
-        width: 200, padding: '10px 8px',
+        width: leftW, padding: '10px 8px',
         background: C.bg, borderRight: `1px solid ${C.border}`,
         backdropFilter: 'blur(12px)', overflowY: 'auto', zIndex: 50,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <span style={{ fontSize: 9, color: C.textDim, letterSpacing: 2 }}>NOTIFICATIONS</span>
-          {visibleNotifs.length > 0 && (
-            <button onClick={clearNotifs} style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 9, cursor: 'pointer', letterSpacing: 1, fontFamily: font }}>PUHASTA</button>
-          )}
-        </div>
-        {visibleNotifs.length === 0 && <div style={{ fontSize: 11, color: '#333', textAlign: 'center', marginTop: 20 }}>Puhas</div>}
+        {(visibleNotifs.length > 0 || !isXREAL) && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 9, color: C.textDim, letterSpacing: 2 }}>NOTIFICATIONS</span>
+            {visibleNotifs.length > 0 && (
+              <button onClick={clearNotifs} style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 9, cursor: 'pointer', letterSpacing: 1, fontFamily: font }}>PUHASTA</button>
+            )}
+          </div>
+        )}
+        {visibleNotifs.length === 0 && !isXREAL && <div style={{ fontSize: 11, color: '#333', textAlign: 'center', marginTop: 20 }}>Puhas</div>}
         {visibleNotifs.map(n => (
           <NotificationCard key={n.id} level={n.level} msg={n.msg} onDismiss={n.level !== 'critical' ? () => dismiss(n.id) : undefined} />
         ))}
@@ -935,7 +952,7 @@ export default function GlassesHUD() {
       </div>
 
       {/* ══ UJUVAD AKNAD ══════════════════════════════════════════════════════ */}
-      <div style={{ position: 'absolute', top: 44, left: 200, right: 160, bottom: 52, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 44, left: leftW, right: 160, bottom: 52, overflow: 'hidden' }}>
         {Object.entries(WIN_DEFS).map(([id, def]) => (
           <FloatWin key={id}
             winState={wins[id]}
@@ -1014,7 +1031,7 @@ export default function GlassesHUD() {
 
       {/* ══ BOTTOM DOCK ══════════════════════════════════════════════════════ */}
       <div style={{
-        position: 'absolute', bottom: 0, left: 200, right: 160, height: 52,
+        position: 'absolute', bottom: 0, left: leftW, right: 160, height: 52,
         background: C.bg, borderTop: `1px solid ${C.border}`,
         backdropFilter: 'blur(20px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
