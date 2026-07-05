@@ -6,3 +6,5 @@ dist/
 .DS_Store
 *.log
 jarvis_memory.json
+albert_os.db
+frontend/.claude/
