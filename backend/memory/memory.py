@@ -311,6 +311,11 @@ def save_fact(key: str, value: str):
         c.execute("INSERT OR REPLACE INTO facts VALUES (?,?,?)",
                   (key, value, datetime.now().isoformat()))
     _index_memory(key, "fact", importance=0.6)
+    try:
+        from core.sync import mark_dirty
+        mark_dirty("facts", key, "upsert", {"key": key, "value": value[:200]})
+    except Exception:
+        pass
 
 def get_fact(key: str) -> str | None:
     with _conn() as c:
@@ -406,6 +411,12 @@ def add_knowledge(title: str, content: str, category: str = "general",
                         (title, content, category, tags, project, datetime.now().isoformat()))
         kid = cur.lastrowid
     _index_memory(title, f"knowledge:{category}", project=project, importance=0.85)
+    try:
+        from core.sync import mark_dirty
+        mark_dirty("knowledge", project or "global", "insert",
+                   {"title": title, "category": category, "project": project})
+    except Exception:
+        pass
     return kid
 
 def search_knowledge(query: str, category: str = None, project: str = None) -> list:
@@ -527,6 +538,12 @@ def save_note(content: str, tags: str = "", project: str = "", importance: int =
         c.execute("INSERT INTO notes (content,tags,project,importance,created_at) VALUES (?,?,?,?,?)",
                   (content, tags, project, importance, datetime.now().isoformat()))
     _index_memory(content[:80], "note", project=project, importance=0.4 + importance * 0.2)
+    try:
+        from core.sync import mark_dirty
+        mark_dirty("notes", project or "global", "insert",
+                   {"content": content[:100], "tags": tags, "project": project})
+    except Exception:
+        pass
 
 def search_notes(query: str, project: str = None) -> list:
     with _conn() as c:
@@ -561,6 +578,12 @@ def save_interaction(device: str, prompt: str, results: list,
         count = c.execute("SELECT COUNT(*) as n FROM conversations").fetchone()["n"]
         if count > 100 and count % 50 == 0:
             _summarize_old_conversations(c)
+    try:
+        from core.sync import mark_dirty
+        mark_dirty("conversations", device, "insert",
+                   {"device": device, "prompt": prompt[:100], "provider": provider})
+    except Exception:
+        pass
 
 def _summarize_old_conversations(c):
     """Koondab vanad vestlused kokku faktidena (lihtne heuristika; asenda LLM-iga tulevikus)."""

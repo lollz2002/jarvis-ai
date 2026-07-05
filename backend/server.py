@@ -184,6 +184,16 @@ async def handle_ws_message(ws: WebSocket, device_id: str, data: dict):
                     "msg": f"⚠ {danger_desc}. Kinnita: saada sama sõnum tekstiga 'KINNITAN: {prompt[:30]}'"})
                 return
 
+        # Injection detection
+        if prompt:
+            is_injection, injection_patterns = injection_detector.analyze(prompt)
+            if is_injection:
+                audit("injection_detected", {"device": device_id, "prompt": prompt[:60],
+                                             "patterns": injection_patterns})
+                await ws.send_json({"type": "error",
+                    "msg": "Prompt injection tuvastatud — päring blokeeritud."})
+                return
+
         # 0. Plugin voice command dispatch (enne AI-d)
         if prompt:
             from agents.director import detect_language
