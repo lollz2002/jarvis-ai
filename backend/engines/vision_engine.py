@@ -1,10 +1,23 @@
 """
-Albert OS — Vision Engine
-Spek: 06_VISION_ENGINE.md
+Albert OS — Vision Engine v2
+Spek: 29_VISION_BIBLE.md
 
-Pipeline: capture → enhance → detect scene → OCR → memory → AI → response → save
+Pipeline:
+  Camera/Image → Pre-processing → Scene Detection → Object Detection
+  → OCR → Context Builder → Memory Retrieval → JarvisDirector
+  → AI Provider(s) → Response Composer → AR Overlay (optional)
+
+Standard response format (7 fields):
+  1. What I see
+  2. Confidence
+  3. Why I think this
+  4. Possible issues
+  5. Recommended next step
+  6. Safety notes
+  7. Related documentation
 """
 import re
+import base64
 
 # ── Visioonirežiimi tuvastamine ───────────────────────────────────────────────
 VISION_MODE_KEYWORDS = {
@@ -30,60 +43,48 @@ def detect_vision_mode(prompt: str, memory_ctx: str = "") -> str:
     return "general"
 
 # ── Režiimispetsiifilised süsteemi juhised ────────────────────────────────────
+# Standard 7-field format (spek: 29_VISION_BIBLE.md)
+_FMT = """Respond in this exact 7-field format:
+1. ВИЖУ: [what you see]
+2. УВЕРЕННОСТЬ: [High / Medium / Low]
+3. ПОЧЕМУ: [key visual signals that led to this conclusion]
+4. ПРОБЛЕМЫ: [possible issues or faults — or 'None']
+5. СЛЕДУЮЩИЙ ШАГ: [one concrete recommended action]
+6. БЕЗОПАСНОСТЬ: [safety warnings — or 'None']
+7. ДОКУМЕНТАЦИЯ: [relevant manual, part number, datasheet, or standard — or 'None']"""
+
 VISION_MODE_PROMPTS = {
-    "general": """Analyze this image and respond in this exact format:
-1. ВИЖУ: [what you see, briefly]
-2. УВЕРЕННОСТЬ: [High/Medium/Low]
-3. ПОЧЕМУ: [reasoning]
-4. СЛЕДУЮЩИЙ ШАГ: [practical recommendation]
-5. БЕЗОПАСНОСТЬ: [any safety notes, or 'None']
-6. ДОКУМЕНТАЦИЯ: [relevant manual/reference, or 'None']""",
+    "general": f"""Analyze this image as a knowledgeable engineering assistant.
+{_FMT}""",
 
-    "bmw": """You are analyzing a BMW vehicle component. Identify engine parts, sensors, connectors, wiring, hoses.
-Respond in this exact format:
-1. ВИЖУ: [component name and location]
-2. УВЕРЕННОСТЬ: [High/Medium/Low]
-3. ПОЧЕМУ: [identifying features]
-4. СЛЕДУЮЩИЙ ШАГ: [repair suggestion or diagnostic step]
-5. БЕЗОПАСНОСТЬ: [safety warnings if applicable]
-6. ДОКУМЕНТАЦИЯ: [BMW repair manual reference or ETK part number if known]""",
+    "bmw": f"""You are analyzing a BMW vehicle component.
+Recognize: engines, sensors, connectors, wiring harnesses, ECUs, hoses, bolts, fault indicators.
+Output includes: probable fault, confidence, repair steps, required tools, manuals.
+{_FMT}
+For field 7: cite BMW ISTA reference, ETK part number, or WIS document if known.""",
 
-    "boat": """You are analyzing a marine/boat component. Identify engine, electrical, plumbing components.
-Respond in this exact format:
-1. ВИЖУ: [component and condition]
-2. УВЕРЕННОСТЬ: [High/Medium/Low]
-3. ПОЧЕМУ: [identifying features]
-4. СЛЕДУЮЩИЙ ШАГ: [maintenance or repair recommendation]
-5. БЕЗОПАСНОСТЬ: [marine safety notes]
-6. ДОКУМЕНТАЦИЯ: [service manual reference if known]""",
+    "boat": f"""You are analyzing a marine / boat component.
+Recognize: engines, cooling systems, fuel systems, NMEA equipment, electrical systems, plumbing.
+{_FMT}
+For field 7: cite engine service manual, NMEA standard, or supplier reference if known.""",
 
-    "construction": """You are analyzing a construction site, tools, or materials.
-Respond in this exact format:
-1. ВИЖУ: [tool/material/installation]
-2. УВЕРЕННОСТЬ: [High/Medium/Low]
-3. ПОЧЕМУ: [identifying features]
-4. СЛЕДУЮЩИЙ ШАГ: [practical recommendation]
-5. БЕЗОПАСНОСТЬ: [construction safety notes]
-6. ДОКУМЕНТАЦИЯ: [building code or standard if applicable]""",
+    "construction": f"""You are analyzing a construction site, tools, materials or installation.
+Recognize: structural elements, materials, tools, plumbing, electrical installations.
+{_FMT}
+For field 7: cite building code, standard (EN/ISO) or material spec if applicable.""",
 
-    "electronics": """You are analyzing electronic components, PCB, connectors, or wiring.
-Respond in this exact format:
-1. ВИЖУ: [component type and condition]
-2. УВЕРЕННОСТЬ: [High/Medium/Low]
-3. ПОЧЕМУ: [identifying features — markings, layout, pins]
-4. СЛЕДУЮЩИЙ ШАГ: [repair or measurement recommendation]
-5. БЕЗОПАСНОСТЬ: [electrical safety notes]
-6. ДОКУМЕНТАЦИЯ: [datasheet or standard if known]""",
+    "electronics": f"""You are analyzing electronic components, PCB, connectors or wiring.
+Recognize: PCBs, ICs, capacitors, relays, connectors, polarity markers, damaged components.
+{_FMT}
+For field 7: cite IC datasheet, connector standard, or board revision if visible.""",
 
-    "documents": """You are performing OCR and document analysis.
-Respond in this exact format:
-1. ВИЖУ: [document type and content summary]
-2. УВЕРЕННОСТЬ: [High/Medium/Low for OCR accuracy]
-3. ПОЧЕМУ: [document structure clues]
-4. СЛЕДУЮЩИЙ ШАГ: [suggested action — sign, translate, file, review]
-5. БЕЗОПАСНОСТЬ: [privacy notes if sensitive info detected]
-6. ДОКУМЕНТАЦИЯ: [N/A]
-Also provide: ТЕКСТ: [full extracted text if readable]""",
+    "documents": f"""You are performing OCR and document analysis.
+Support: text extraction, translation hints, table extraction, part number extraction, summarization.
+{_FMT}
+For field 7: N/A (the document IS the reference).
+After the 7 fields add:
+ТЕКСТ: [full extracted text, preserve structure]
+АРТИКУЛ: [any part numbers, order codes or serial numbers found — comma separated, or 'None']""",
 }
 
 def get_vision_system_prompt(mode: str, base_system: str) -> str:
@@ -91,15 +92,44 @@ def get_vision_system_prompt(mode: str, base_system: str) -> str:
     vision_instruction = VISION_MODE_PROMPTS.get(mode, VISION_MODE_PROMPTS["general"])
     return f"{base_system}\n\nVISION MODE: {mode.upper()}\n{vision_instruction}"
 
+
+# ── Pre-processing ────────────────────────────────────────────────────────────
+def preprocess_image(image_b64: str) -> dict:
+    """
+    Lihtne eeltöötlus enne AI-le saatmist.
+    Tagastab metaandmed: suurus, formaat, kvaliteedihoiatus.
+    Päris suurendamine/teritamine nõuab Pillow — see on lihtne validaator.
+    """
+    if not image_b64:
+        return {"ok": False, "reason": "empty"}
+    try:
+        data = base64.b64decode(image_b64)
+        size_kb = len(data) / 1024
+        # Väga väike pilt — kvaliteet kahtlane
+        if size_kb < 5:
+            return {"ok": True, "size_kb": size_kb, "warning": "very_small_image"}
+        # Väga suur — saata ikkagi, AI toetab kuni ~20MB
+        if size_kb > 15_000:
+            return {"ok": False, "size_kb": size_kb, "reason": "image_too_large"}
+        return {"ok": True, "size_kb": round(size_kb, 1)}
+    except Exception as e:
+        return {"ok": False, "reason": str(e)}
+
+
+# ── Projekti salvestamine (Project Brain nimed) ───────────────────────────────
+# project_name peab ühtima init_project_brain() nimedega (memory/memory.py)
+_MODE_TO_PROJECT = {
+    "bmw":          ("BMW",   "diagnosis"),
+    "boat":         ("Paat",  "maintenance"),
+    "construction": ("Kood",  "note"),      # ehitusprojekt → Kood alla kuni eraldi projekt
+    "electronics":  ("Kood",  "note"),
+    "documents":    (None,     None),        # dokumendid projekti pole → ainult notes
+}
+
 def should_save_to_project(mode: str, response: str) -> tuple[str | None, str | None]:
     """
     Otsustab kas visioonivastus tuleks projekti mällu salvestada.
     Tagastab (project_name, entry_type) või (None, None).
+    Projekti nimed vastavad Project Brain nimedele (28_MEMORY_BIBLE.md).
     """
-    if mode == "bmw":
-        return "BMW", "note"
-    if mode == "boat":
-        return "Boat", "maintenance"
-    if mode == "construction":
-        return "Construction", "note"
-    return None, None
+    return _MODE_TO_PROJECT.get(mode, (None, None))

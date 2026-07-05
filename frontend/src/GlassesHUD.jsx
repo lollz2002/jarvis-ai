@@ -753,6 +753,9 @@ export default function GlassesHUD() {
         {/* Subtiitrid */}
         <TopBtn active={subtitles} onClick={() => setSubtitles(s => !s)} title="Subtiitrid">CC</TopBtn>
 
+        {/* Kaamera staatus */}
+        {wins['camera']?.open && <HUDWidget icon="📷" value="LIVE" color={C.red} blink />}
+
         {/* FPS monitor */}
         {fps !== null && <HUDWidget icon="⚡" value={`${fps}fps`} color={fps >= 55 ? C.green : fps >= 30 ? C.yellow : C.red} />}
 

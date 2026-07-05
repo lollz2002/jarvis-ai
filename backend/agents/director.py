@@ -26,7 +26,7 @@ from core.response_composer import (
     compose_parallel_results, compose,
     cache_get, cache_set,
 )
-from engines.vision_engine import detect_vision_mode, get_vision_system_prompt, should_save_to_project
+from engines.vision_engine import detect_vision_mode, get_vision_system_prompt, should_save_to_project, preprocess_image
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -221,6 +221,14 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
         cached = cache_get(prompt or "", intent, primary_provider)
         if cached:
             return cached, []
+
+    # ── Pildi eeltöötlus ─────────────────────────────────────────────────────
+    if image_b64:
+        pre = preprocess_image(image_b64)
+        if not pre.get("ok"):
+            return f"Pildi töötlemine ebaõnnestus: {pre.get('reason', 'unknown')}", []
+        if pre.get("warning") == "very_small_image":
+            prompt = (prompt or "") + " [Note: image is very small, quality may be low]"
 
     # Vision Engine — spetsialiseeritud režiim piltide jaoks
     if intent == "vision":
