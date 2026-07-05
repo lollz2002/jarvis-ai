@@ -379,10 +379,25 @@ async def plugin_command(plugin_id: str, request: Request):
     result = await plugin.run_command(body.get("cmd", ""), body.get("args", {}))
     return {"result": result}
 
+@app.post("/plugins/{plugin_id}/enable")
+async def plugin_enable(plugin_id: str):
+    return await get_registry().enable(plugin_id)
+
+@app.post("/plugins/{plugin_id}/disable")
+async def plugin_disable(plugin_id: str):
+    return await get_registry().disable(plugin_id)
+
 @app.delete("/plugins/{plugin_id}")
 async def plugin_remove(plugin_id: str):
-    await get_registry().remove(plugin_id)
-    return {"ok": True}
+    return await get_registry().uninstall(plugin_id)
+
+@app.post("/plugins/manifest/validate")
+async def plugin_manifest_validate(request: Request):
+    """Manifest JSON valideerimine (spec 38 — Testing Checklist)."""
+    from core.plugin_sdk import PluginLoader
+    body = await request.json()
+    errors = PluginLoader.validate_manifest(body)
+    return {"valid": len(errors) == 0, "errors": errors, "sdk_version": "2.0.0"}
 
 # ── Monitoring & Observability (API v1) ───────────────────────────────────────
 @app.get("/api/v1/monitor/stats")
