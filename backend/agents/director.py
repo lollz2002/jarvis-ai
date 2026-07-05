@@ -21,6 +21,11 @@ from agents.personality import JARVIS_SYSTEM, build_system
 from core.monitor import audit
 from core.tools import TOOLS, execute_tool, get_cfg
 from core.routing_config import INTENT_PATTERNS, PROVIDERS, ROUTING, FALLBACK_CHAIN
+from core.planner import is_complex_request, build_plan, format_plan_for_prompt
+from core.response_composer import (
+    compose_parallel_results, compose,
+    cache_get, cache_set,
+)
 from engines.vision_engine import detect_vision_mode, get_vision_system_prompt, should_save_to_project
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -210,6 +215,13 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
     active_project = detect_active_project(prompt or "")
     routing = ROUTING.get(intent, ROUTING["general"])
 
+    # ── Vahemälu kontroll (tekstipäringud, mitte pildid) ──────────────────────
+    if not image_b64:
+        primary_provider = routing["primary"]
+        cached = cache_get(prompt or "", intent, primary_provider)
+        if cached:
+            return cached, []
+
     # Vision Engine — spetsialiseeritud režiim piltide jaoks
     if intent == "vision":
         vision_mode = detect_vision_mode(prompt or "", memory_ctx)
@@ -230,26 +242,25 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
         personality_mode = mode_map.get(intent)
         system = build_system(mode=personality_mode, memory_ctx=memory_ctx, lang=lang, intent=intent)
 
+    # ── Planner — keeruliste päringute sammude lisamine prompti ───────────────
+    if is_complex_request(prompt or "", intent):
+        steps = build_plan(prompt or "", intent)
+        system += "\n\n" + format_plan_for_prompt(steps)
+
     ws_commands = []
     primary = routing["primary"]
     verify_with = routing["verify_with"]
     run_parallel = routing.get("parallel", False) and verify_with
 
-    # ── Paralleelne täitmine ──────────────────────────────────────────────────
+    # ── Paralleelne täitmine + Response Composer ─────────────────────────────
     if run_parallel and verify_with:
-        results = await asyncio.gather(
+        raw_results = await asyncio.gather(
             _call_provider(primary, prompt, image_b64, system),
             _call_provider(verify_with, prompt, image_b64, system),
             return_exceptions=True
         )
-        primary_result = results[0] if not isinstance(results[0], Exception) else (None, [])
-        verify_result = results[1] if not isinstance(results[1], Exception) else (None, [])
-        text, ws = primary_result
+        text, ws = compose_parallel_results(raw_results, intent=intent, lang=lang)
         ws_commands.extend(ws)
-        # Merge: kui primary töötab, kasuta seda; verify lisab ainult täiendust diagnostikas
-        if not text:
-            text, ws = verify_result
-            ws_commands.extend(ws)
     else:
         text, ws = await _call_provider(primary, prompt, image_b64, system)
         ws_commands.extend(ws)
@@ -294,6 +305,10 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
                                   f"[{intent}] {(prompt or '')[:80]} → {text[:300]}")
         except Exception:
             pass
+
+    # Vahemällu salvestamine (ainult kõrge/keskmise kindlusega tekstivastused)
+    if text and not image_b64 and confidence in ("high", "medium"):
+        cache_set(prompt or "", intent, primary, text)
 
     audit("director_response", {
         "intent": intent, "provider": primary,
