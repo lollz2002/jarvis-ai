@@ -66,12 +66,13 @@ const WORKSPACES = {
 const WIN_DEFS = {
   jarvis:   { title: 'JARVIS',    icon: '🤖', defaultPos: { x: 320, y: 80 },  w: 320, h: 340 },
   browser:  { title: 'БРАУЗЕР',   icon: '🌐', defaultPos: { x: 660, y: 80 },  w: 480, h: 360 },
-  camera:   { title: 'КАМЕРА',    icon: '📷', defaultPos: { x: 320, y: 430 }, w: 320, h: 260 },
+  camera:   { title: 'КАМЕРА',    icon: '📷', defaultPos: { x: 320, y: 430 }, w: 340, h: 320 },
   notes:    { title: 'ЗАМЕТКИ',   icon: '📝', defaultPos: { x: 1160, y: 80 }, w: 260, h: 280 },
   youtube:  { title: 'YOUTUBE',   icon: '▶',  defaultPos: { x: 660, y: 80 },  w: 480, h: 340 },
   clock:    { title: 'ВРЕМЯ',     icon: '🕐', defaultPos: { x: 1160, y: 380 }, w: 200, h: 90  },
   plugins:  { title: 'PLUGINAD',  icon: '🔌', defaultPos: { x: 660,  y: 430 }, w: 320, h: 280 },
-  settings: { title: 'SEADED',    icon: '⚙',  defaultPos: { x: 860,  y: 80 },  w: 320, h: 380 },
+  settings: { title: 'SEADED',    icon: '⚙',  defaultPos: { x: 860,  y: 80 },  w: 360, h: 440 },
+  projects: { title: 'PROJEKTID', icon: '📁', defaultPos: { x: 660,  y: 430 }, w: 380, h: 320 },
 }
 
 // ── Ujuv aken ─────────────────────────────────────────────────────────────────
@@ -119,8 +120,8 @@ function FloatWin({ winState, title, icon, children, onClose, onMinimize, onMaxi
         backdropFilter: 'blur(16px)',
         opacity,
         display: 'flex', flexDirection: 'column',
-        transition: 'height 0.2s, opacity 0.15s, border-color 0.15s',
-        animation: 'fadeIn 0.2s ease',
+        transition: 'height 0.2s, opacity 0.15s, border-color 0.15s, width 0.2s, left 0.2s, top 0.2s',
+        animation: 'winOpen 0.2s ease',
         zIndex,
       }}
     >
@@ -303,6 +304,52 @@ function ClockPanel() {
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://carefree-gentleness-production-6657.up.railway.app'
 
+function ProjectsPanel() {
+  const [projects, setProjects] = useState([])
+  const [loading, setLoading]   = useState(true)
+
+  useEffect(() => {
+    fetch(`${BACKEND}/api/v1/memory/projects`)
+      .then(r => r.json()).then(d => setProjects(Array.isArray(d) ? d : d.projects || []))
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const statusColor = { active: C.green, paused: C.yellow, completed: C.blue, archived: C.textDim }
+  const statusLabel = { active: 'AKTIIVNE', paused: 'PAUSIL', completed: 'VALMIS', archived: 'ARHIIV' }
+
+  return (
+    <div style={{ padding: '10px 12px', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2 }}>PROJEKTID</div>
+      {loading && <div style={{ color: C.textDim, fontSize: 12 }}>Laen...</div>}
+      {!loading && projects.length === 0 && (
+        <div style={{ color: C.textDim, fontSize: 12, textAlign: 'center', marginTop: 24 }}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>📁</div>
+          Projekte pole. Räägi JARVISELE projekti alustamiseks.
+        </div>
+      )}
+      {projects.map(p => (
+        <div key={p.id || p.name} style={{
+          background: '#ffffff06', border: `1px solid ${C.border}`,
+          borderLeft: `3px solid ${statusColor[p.status] || C.border}`,
+          borderRadius: 6, padding: '7px 10px',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: C.text, fontWeight: 600 }}>{p.name}</span>
+            <span style={{ fontSize: 8, color: statusColor[p.status] || C.textDim, letterSpacing: 1 }}>{statusLabel[p.status] || (p.status || '').toUpperCase()}</span>
+          </div>
+          {p.description && <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>{p.description}</div>}
+          {p.updated_at && (
+            <div style={{ fontSize: 9, color: '#444', marginTop: 3 }}>
+              {new Date(p.updated_at).toLocaleDateString('et-EE', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function PluginsPanel() {
   const [plugins, setPlugins] = useState([])
   const [loading, setLoading] = useState(true)
@@ -388,6 +435,47 @@ function SettingsPanel({ prefs, setPrefs, onResetWizard }) {
         { label: 'Vaikne', value: 'silent' },
       ]))}
 
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>VISIOON</div>
+      {row('Analüüsi režiim', sel('visionMode', [
+        { label: 'Automaatne', value: 'auto' },
+        { label: 'BMW / Auto', value: 'bmw' },
+        { label: 'Dokument', value: 'document' },
+        { label: 'Paat', value: 'boat' },
+      ]))}
+      {row('Auto-analüüs', (
+        <button onClick={() => setPrefs({ autoAnalyze: !prefs.autoAnalyze })}
+          style={{ background: prefs.autoAnalyze ? `${C.green}20` : '#ffffff0a', border: `1px solid ${prefs.autoAnalyze ? C.green : C.border}`, color: prefs.autoAnalyze ? C.green : C.textDim, borderRadius: 4, padding: '2px 10px', fontSize: 10, cursor: 'pointer', fontFamily: font }}>
+          {prefs.autoAnalyze ? 'SEES' : 'VÄLJAS'}
+        </button>
+      ))}
+
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>AR / SEADE</div>
+      {row('AR profiil', sel('arProfile', [
+        { label: 'Automaatne', value: 'auto' },
+        { label: 'Telefon', value: 'phone' },
+        { label: 'XREAL', value: 'xreal' },
+        { label: 'Väline ekraan', value: 'external' },
+      ]))}
+      {row('Keepcenter overlay', (
+        <button onClick={() => setPrefs({ keepCenterOverlay: !prefs.keepCenterOverlay })}
+          style={{ background: prefs.keepCenterOverlay ? `${C.blue}20` : '#ffffff0a', border: `1px solid ${prefs.keepCenterOverlay ? C.blue : C.border}`, color: prefs.keepCenterOverlay ? C.blue : C.textDim, borderRadius: 4, padding: '2px 10px', fontSize: 10, cursor: 'pointer', fontFamily: font }}>
+          {prefs.keepCenterOverlay ? 'SEES' : 'VÄLJAS'}
+        </button>
+      ))}
+
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>PRIVAATSUS</div>
+      {row('Mälu', sel('memoryScope', [
+        { label: 'Kõik salvestatakse', value: 'full' },
+        { label: 'Ainult faktid', value: 'facts' },
+        { label: 'Ei salvestata', value: 'none' },
+      ]))}
+      {row('Logid', (
+        <button onClick={() => setPrefs({ logsEnabled: !prefs.logsEnabled })}
+          style={{ background: prefs.logsEnabled ? `${C.green}20` : '#ffffff0a', border: `1px solid ${prefs.logsEnabled ? C.green : C.border}`, color: prefs.logsEnabled ? C.green : C.textDim, borderRadius: 4, padding: '2px 10px', fontSize: 10, cursor: 'pointer', fontFamily: font }}>
+          {prefs.logsEnabled ? 'SEES' : 'VÄLJAS'}
+        </button>
+      ))}
+
       <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>SÜSTEEM</div>
       {row('Lemmik ws', sel('favoriteWorkspace', [
         { label: 'Kodu', value: 'home' }, { label: 'Töökoda', value: 'workshop' },
@@ -400,8 +488,35 @@ function SettingsPanel({ prefs, setPrefs, onResetWizard }) {
           KORDA
         </button>
       ))}
+      <div style={{ marginTop: 14, padding: '8px 0', borderTop: `1px solid ${C.border}`, fontSize: 9, color: '#333', letterSpacing: 1, textAlign: 'center' }}>
+        ALBERT OS v2.0 · Railway + Vercel
+      </div>
     </div>
   )
+}
+
+// ── Ilmateade (wttr.in, ei vaja API võtit) ───────────────────────────────────
+function useWeather() {
+  const [weather, setWeather] = useState(null)
+  useEffect(() => {
+    async function load() {
+      try {
+        const r = await fetch('https://wttr.in/?format=j1')
+        const d = await r.json()
+        const cur = d.current_condition?.[0]
+        if (!cur) return
+        setWeather({
+          temp: cur.temp_C,
+          desc: cur.weatherDesc?.[0]?.value || '',
+          icon: ['☀', '⛅', '🌧', '❄', '⛈', '🌫'][Math.min(5, Math.floor((+cur.weatherCode - 100) / 100))] || '🌡',
+        })
+      } catch (_) {}
+    }
+    load()
+    const t = setInterval(load, 10 * 60 * 1000) // uuenda iga 10 min
+    return () => clearInterval(t)
+  }, [])
+  return weather
 }
 
 // ── Peamine HUD ───────────────────────────────────────────────────────────────
@@ -411,6 +526,7 @@ export default function GlassesHUD() {
   const { device, adapter, layout, profile } = useDeviceManager()
   const { prefs, setPrefs, completeFirstLaunch } = useUserPrefs()
   const { unlocked, playing: audioPlaying, playBase64, stop: stopAudio } = useAudio()
+  const weather = useWeather()
   const [sphereState, setSphereState] = useState('idle')
   const [listening, setListening]     = useState(false)
   const [interim, setInterim]         = useState('')
@@ -604,6 +720,9 @@ export default function GlassesHUD() {
         {/* WiFi */}
         <HUDWidget icon={navigator.onLine ? '📶' : '📵'} value={navigator.onLine ? 'ON' : 'OFF'} color={navigator.onLine ? C.green : C.red} />
 
+        {/* Ilm */}
+        {weather && <HUDWidget icon={weather.icon} value={`${weather.temp}°C`} color={C.blue} label={weather.desc} />}
+
         {/* AI Provider */}
         <HUDWidget icon="🤖" value={status === 'online' ? 'GPT-4o' : '—'} color={C.orange} />
 
@@ -708,6 +827,7 @@ export default function GlassesHUD() {
             {id === 'clock'    && <ClockPanel />}
             {id === 'plugins'  && <PluginsPanel />}
             {id === 'settings' && <SettingsPanel prefs={prefs} setPrefs={setPrefs} onResetWizard={() => setPrefs({ firstLaunchDone: false })} />}
+            {id === 'projects' && <ProjectsPanel />}
           </FloatWin>
         ))}
 
@@ -798,6 +918,18 @@ export default function GlassesHUD() {
           <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>PLUGINAD</span>
         </button>
 
+        {/* Projektid nupp */}
+        <button onClick={() => openWin('projects')} style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+          background: wins['projects']?.open ? `${C.orange}20` : 'none',
+          border: `1px solid ${wins['projects']?.open ? C.orange : C.border}`,
+          borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
+          color: wins['projects']?.open ? C.orange : C.textDim, minWidth: 56,
+        }}>
+          <span style={{ fontSize: 16 }}>📁</span>
+          <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>PROJEKTID</span>
+        </button>
+
         {/* Seaded nupp */}
         <button onClick={() => openWin('settings')} style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
@@ -827,9 +959,10 @@ export default function GlassesHUD() {
       </div>
 
       <style>{`
-        @keyframes fadeIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
-        @keyframes blink  { 50% { opacity: 0.2; } }
-        @keyframes pulse  { 50% { opacity: 0.4; } }
+        @keyframes fadeIn  { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+        @keyframes winOpen { from { opacity: 0; transform: scale(0.95) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        @keyframes blink   { 50% { opacity: 0.2; } }
+        @keyframes pulse   { 50% { opacity: 0.4; } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 3px; }
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 2px; }
