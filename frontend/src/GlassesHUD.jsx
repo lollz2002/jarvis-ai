@@ -17,6 +17,7 @@ import { useDeviceManager } from './hooks/useDeviceManager'
 import { useUserPrefs } from './hooks/useUserPrefs'
 import FirstLaunchWizard from './components/FirstLaunchWizard'
 import { useAudio } from './hooks/useAudio'
+import { useXRSession } from './hooks/useXRSession'
 
 function getDeviceId() {
   let id = localStorage.getItem('jarvis_device_id')
@@ -535,7 +536,7 @@ export default function GlassesHUD() {
     wins, focusedId,
     openWin, closeWin, minimizeWin, maximizeWin, pinWin, focus,
     setWinPos, setWinSize, setWinOpacity,
-    applyWorkspace, closeAll,
+    applyWorkspace, applySafeWalking, closeAll,
   } = useWindowManager(WIN_DEFS, { jarvis: true, clock: true })
   const [notes, setNotes]             = useState([])
   const [subtitles, setSubtitles]     = useState(false)
@@ -618,9 +619,10 @@ export default function GlassesHUD() {
     applyWorkspace(cfg.wins)
     setPrefs({ favoriteWorkspace: id })
     addNotif(`Workspace: ${cfg.name}`, 'info')
-    // Safe walking/driving: XR layout reeglite alusel sulge mittevajalikud aknad
-    if ((id === 'driving' || id === 'walking') && layout?.safeWalkingReduced) {
-      addNotif('Turvaline režiim: mittevajalikud aknad suletud', 'warning')
+    // Safe walking/driving: liiguta aknad servadesse, vähenda läbipaistvust
+    if (id === 'driving' || id === 'walking') {
+      setTimeout(applySafeWalking, 100) // pärast applyWorkspace'i
+      addNotif('Turvaline režiim: aknad servadesse liigutatud', 'info')
     }
   }
 
@@ -688,6 +690,17 @@ export default function GlassesHUD() {
   const [battery, setBattery] = useState(null)
   useEffect(() => { navigator.getBattery?.().then(b => { setBattery(Math.round(b.level * 100)); b.onlevelchange = () => setBattery(Math.round(b.level * 100)) }) }, [])
 
+  // XR seansi recovery + FPS
+  const { fps, sessionRestored } = useXRSession({
+    currentProfile: profile || 'phone',
+    currentWorkspace: ws,
+    wins,
+    onRestore: (saved) => {
+      if (saved.workspace) applyWs(saved.workspace)
+      addNotif(`XR seanss taastatud: ${saved.workspace || '?'}`, 'info')
+    },
+  })
+
   // Esimene käivitus — näita nõustajat
   if (!prefs.firstLaunchDone) {
     return <FirstLaunchWizard onComplete={completeFirstLaunch} setPrefs={setPrefs} />
@@ -740,9 +753,13 @@ export default function GlassesHUD() {
         {/* Subtiitrid */}
         <TopBtn active={subtitles} onClick={() => setSubtitles(s => !s)} title="Subtiitrid">CC</TopBtn>
 
+        {/* FPS monitor */}
+        {fps !== null && <HUDWidget icon="⚡" value={`${fps}fps`} color={fps >= 55 ? C.green : fps >= 30 ? C.yellow : C.red} />}
+
         {/* Heli olek — näitab kui AudioContext on lukustatud */}
         {!unlocked && <HUDWidget icon="🔇" value="puuduta" color={C.yellow} label="Heli lubamiseks puuduta ekraani" blink />}
         {audioPlaying && <HUDWidget icon="🔊" value="RÄÄGIB" color={C.orange} blink />}
+        {sessionRestored && <HUDWidget icon="🔄" value="TAASTATUD" color={C.blue} blink />}
 
         {/* Mikrofon */}
         <TopBtn active={listening} onClick={toggleMic} color={listening ? C.red : undefined}>

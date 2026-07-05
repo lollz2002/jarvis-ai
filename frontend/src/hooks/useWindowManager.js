@@ -125,6 +125,38 @@ export function useWindowManager(WIN_DEFS, initialWorkspaceWins = {}) {
     ))
   }, [])
 
+  /**
+   * Safe Walking Mode — liiguta aknad servadesse, vähenda läbipaistvust.
+   * Spek: 26_AR_RUNTIME_AND_RENDER_ENGINE.md
+   * Avab ainult jarvis + clock, paneb teised minimiseerituks + opacity 0.5.
+   */
+  const applySafeWalking = useCallback(() => {
+    setWins(prev => {
+      const entries = Object.entries(prev)
+      // Leia avatud aknad, jaota: osa vasakule servale, osa paremale
+      const open = entries.filter(([, w]) => w.open).map(([id]) => id)
+      const leftIds  = open.filter(id => id !== 'jarvis').slice(0, 2)
+      const rightIds = open.filter(id => id !== 'jarvis').slice(2, 4)
+
+      return Object.fromEntries(
+        entries.map(([id, w]) => {
+          if (!w.open) return [id, w]
+          // jarvis: jää nähtavaks, väike opacity
+          if (id === 'jarvis') return [id, { ...w, opacity: 0.7, minimized: false }]
+          // Vasakul serval
+          const li = leftIds.indexOf(id)
+          if (li >= 0) return [id, { ...w, minimized: false, opacity: 0.5, pos: { x: 4, y: 60 + li * 180 } }]
+          // Paremal serval
+          const ri = rightIds.indexOf(id)
+          if (ri >= 0) return [id, { ...w, minimized: false, opacity: 0.5,
+            pos: { x: window.innerWidth - (WIN_DEFS[id]?.w || 260) - 4, y: 60 + ri * 180 } }]
+          // Muud: minimeeri
+          return [id, { ...w, minimized: true }]
+        })
+      )
+    })
+  }, [WIN_DEFS])
+
   return {
     wins,
     focusedId,
@@ -138,6 +170,7 @@ export function useWindowManager(WIN_DEFS, initialWorkspaceWins = {}) {
     setWinSize,
     setWinOpacity,
     applyWorkspace,
+    applySafeWalking,
     closeAll,
   }
 }
