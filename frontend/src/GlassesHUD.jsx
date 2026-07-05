@@ -14,6 +14,9 @@ import {
 import { C, FONT as font, HUDWidget, NotificationCard, StatusDot, Button, LoadingDots } from './components/ui'
 import { useWindowManager } from './hooks/useWindowManager'
 import { useDeviceManager } from './hooks/useDeviceManager'
+import { useUserPrefs } from './hooks/useUserPrefs'
+import FirstLaunchWizard from './components/FirstLaunchWizard'
+import { useAudio } from './hooks/useAudio'
 
 function getDeviceId() {
   let id = localStorage.getItem('jarvis_device_id')
@@ -22,15 +25,31 @@ function getDeviceId() {
 }
 
 // ── Notifikatsiooni süsteem ───────────────────────────────────────────────────
+// Tasemed (19_JARVIS_USER_EXPERIENCE.md):
+//   critical  — alati nähtav, ei kao
+//   important — nähtav kuni dismiss
+//   info      — peidetakse 8s pärast
+//   silent    — salvestatakse, ei kuvata riba-teavitusena
+const NOTIF_TTL = { critical: null, important: null, info: 8000, silent: 0 }
+
 function useNotifications() {
   const [notifs, setNotifs] = useState([])
   const add = useCallback((msg, level = 'info') => {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    setNotifs(n => [{ id, msg, level, ts: Date.now() }, ...n.slice(0, 9)])
-    if (level !== 'critical') setTimeout(() => setNotifs(n => n.filter(x => x.id !== id)), 8000)
+    // Silent: salvesta kuid ära kuva kohe
+    if (level === 'silent') {
+      setNotifs(n => [{ id, msg, level, ts: Date.now(), hidden: true }, ...n.slice(0, 19)])
+      return
+    }
+    setNotifs(n => [{ id, msg, level, ts: Date.now() }, ...n.slice(0, 14)])
+    const ttl = NOTIF_TTL[level]
+    if (ttl !== null) setTimeout(() => setNotifs(n => n.filter(x => x.id !== id)), ttl)
   }, [])
   const dismiss = useCallback((id) => setNotifs(n => n.filter(x => x.id !== id)), [])
-  return { notifs, add, dismiss }
+  const clearAll = useCallback(() => setNotifs(n => n.filter(x => x.level === 'critical')), [])
+  // Ainult mittepeidetud teavitused kuvamiseks
+  const visible = notifs.filter(n => !n.hidden)
+  return { notifs, visible, add, dismiss, clearAll }
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
@@ -45,13 +64,14 @@ const WORKSPACES = {
 }
 
 const WIN_DEFS = {
-  jarvis:  { title: 'JARVIS',    icon: '🤖', defaultPos: { x: 320, y: 80 },  w: 320, h: 340 },
-  browser: { title: 'БРАУЗЕР',   icon: '🌐', defaultPos: { x: 660, y: 80 },  w: 480, h: 360 },
-  camera:  { title: 'КАМЕРА',    icon: '📷', defaultPos: { x: 320, y: 430 }, w: 320, h: 220 },
-  notes:   { title: 'ЗАМЕТКИ',   icon: '📝', defaultPos: { x: 1160, y: 80 }, w: 260, h: 280 },
-  youtube: { title: 'YOUTUBE',   icon: '▶',  defaultPos: { x: 660, y: 80 },  w: 480, h: 340 },
-  clock:   { title: 'ВРЕМЯ',     icon: '🕐', defaultPos: { x: 1160, y: 380 }, w: 200, h: 90  },
-  plugins: { title: 'PLUGINAD',  icon: '🔌', defaultPos: { x: 660,  y: 430 }, w: 320, h: 280 },
+  jarvis:   { title: 'JARVIS',    icon: '🤖', defaultPos: { x: 320, y: 80 },  w: 320, h: 340 },
+  browser:  { title: 'БРАУЗЕР',   icon: '🌐', defaultPos: { x: 660, y: 80 },  w: 480, h: 360 },
+  camera:   { title: 'КАМЕРА',    icon: '📷', defaultPos: { x: 320, y: 430 }, w: 320, h: 260 },
+  notes:    { title: 'ЗАМЕТКИ',   icon: '📝', defaultPos: { x: 1160, y: 80 }, w: 260, h: 280 },
+  youtube:  { title: 'YOUTUBE',   icon: '▶',  defaultPos: { x: 660, y: 80 },  w: 480, h: 340 },
+  clock:    { title: 'ВРЕМЯ',     icon: '🕐', defaultPos: { x: 1160, y: 380 }, w: 200, h: 90  },
+  plugins:  { title: 'PLUGINAD',  icon: '🔌', defaultPos: { x: 660,  y: 430 }, w: 320, h: 280 },
+  settings: { title: 'SEADED',    icon: '⚙',  defaultPos: { x: 860,  y: 80 },  w: 320, h: 380 },
 }
 
 // ── Ujuv aken ─────────────────────────────────────────────────────────────────
@@ -179,17 +199,54 @@ function BrowserPanel() {
   )
 }
 
-function CameraPanel() {
-  const vRef = useRef(null)
+function CameraPanel({ onAnalyze }) {
+  const vRef  = useRef(null)
+  const cvRef = useRef(null)
+  const [snap, setSnap] = useState(null)
+  const [status, setCameraStatus] = useState('starting')
+
   useEffect(() => {
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      .then(s => { if (vRef.current) vRef.current.srcObject = s }).catch(() => {})
+      .then(s => { if (vRef.current) { vRef.current.srcObject = s; setCameraStatus('live') } })
+      .catch(() => setCameraStatus('error'))
     return () => vRef.current?.srcObject?.getTracks().forEach(t => t.stop())
   }, [])
+
+  function capture() {
+    const v = vRef.current
+    if (!v) return null
+    const c = cvRef.current || document.createElement('canvas')
+    c.width = v.videoWidth; c.height = v.videoHeight
+    c.getContext('2d').drawImage(v, 0, 0)
+    const b64 = c.toDataURL('image/jpeg', 0.8).split(',')[1]
+    setSnap(b64)
+    return b64
+  }
+
+  const btnStyle = (color) => ({
+    flex: 1, background: `${color}18`, border: `1px solid ${color}50`,
+    color, borderRadius: 5, padding: '5px 4px', fontSize: 9,
+    fontFamily: font, cursor: 'pointer', letterSpacing: 1,
+  })
+
   return (
-    <div style={{ position: 'relative', height: '100%', background: '#000' }}>
-      <video ref={vRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      <div style={{ position: 'absolute', top: 6, right: 8, color: C.red, fontSize: 8, letterSpacing: 2, fontFamily: font, animation: 'blink 1.2s infinite' }}>● LIVE</div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#000' }}>
+      <div style={{ position: 'relative', flex: 1 }}>
+        <video ref={vRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', display: snap ? 'none' : 'block' }} />
+        {snap && <img src={`data:image/jpeg;base64,${snap}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="snap" />}
+        <div style={{ position: 'absolute', top: 4, right: 6, fontSize: 8, letterSpacing: 2, fontFamily: font,
+          color: status === 'live' ? C.red : C.textDim }}>
+          {status === 'live' ? '● LIVE' : status === 'error' ? '✖ VIGA' : '○ ...'}
+        </div>
+        {snap && <button onClick={() => setSnap(null)} style={{ position: 'absolute', top: 4, left: 6, background: '#000a', border: 'none', color: C.textDim, fontSize: 9, cursor: 'pointer', borderRadius: 3, padding: '2px 6px' }}>✕ LIVE</button>}
+      </div>
+      <div style={{ display: 'flex', gap: 4, padding: '6px 6px', background: '#ffffff06', borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+        <button style={btnStyle(C.orange)} onClick={capture}>📷 JÄÄDV</button>
+        <button style={btnStyle(C.blue)}   onClick={() => { const b = capture(); if (b && onAnalyze) onAnalyze(b, 'analyze') }}>🔍 ANALÜÜS</button>
+        <button style={btnStyle(C.green)}  onClick={() => { const b = capture(); if (b && onAnalyze) onAnalyze(b, 'translate') }}>🌐 TÕLGI</button>
+        <button style={btnStyle(C.yellow)} onClick={() => { const b = capture(); if (b && onAnalyze) onAnalyze(b, 'identify') }}>🏷 MIS?</button>
+        <button style={btnStyle(C.textDim)} onClick={() => { if (snap) { const a = document.createElement('a'); a.href = `data:image/jpeg;base64,${snap}`; a.download = `albert_${Date.now()}.jpg`; a.click() } }}>💾 SALVESTA</button>
+      </div>
     </div>
   )
 }
@@ -288,11 +345,72 @@ function PluginsPanel() {
   )
 }
 
+function SettingsPanel({ prefs, setPrefs, onResetWizard }) {
+  const row = (label, children) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: `1px solid ${C.border}` }}>
+      <span style={{ fontSize: 11, color: C.textDim, fontFamily: font, letterSpacing: 1 }}>{label}</span>
+      <span style={{ fontSize: 11, color: C.text }}>{children}</span>
+    </div>
+  )
+  const sel = (key, opts) => (
+    <select value={prefs[key] || ''} onChange={e => setPrefs({ [key]: e.target.value })}
+      style={{ background: '#000', border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: '2px 6px', fontSize: 10, fontFamily: font, outline: 'none' }}>
+      {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  )
+  return (
+    <div style={{ padding: '12px 14px', height: '100%', overflowY: 'auto', fontFamily: 'system-ui' }}>
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, marginBottom: 12 }}>AI</div>
+      {row('Mudel', sel('preferredAI', [
+        { label: 'GPT-4o', value: 'gpt-4o' },
+        { label: 'Claude Sonnet', value: 'claude-sonnet-4-6' },
+        { label: 'Gemini Flash', value: 'gemini-2.5-flash' },
+      ]))}
+
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>HÄÄL</div>
+      {row('Keel', sel('preferredLang', [
+        { label: 'Vene (ru-RU)', value: 'ru-RU' },
+        { label: 'Eesti (et-EE)', value: 'et-EE' },
+        { label: 'Inglise (en-US)', value: 'en-US' },
+      ]))}
+      {row('Hääl sees', (
+        <button onClick={() => setPrefs({ voiceEnabled: !prefs.voiceEnabled })}
+          style={{ background: prefs.voiceEnabled ? `${C.green}20` : '#ffffff0a', border: `1px solid ${prefs.voiceEnabled ? C.green : C.border}`, color: prefs.voiceEnabled ? C.green : C.textDim, borderRadius: 4, padding: '2px 10px', fontSize: 10, cursor: 'pointer', fontFamily: font }}>
+          {prefs.voiceEnabled ? 'SEES' : 'VÄLJAS'}
+        </button>
+      ))}
+
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>TEAVITUSED</div>
+      {row('Tase', sel('notifLevel', [
+        { label: 'Kõik', value: 'info' },
+        { label: 'Olulised', value: 'important' },
+        { label: 'Kriitilised', value: 'critical' },
+        { label: 'Vaikne', value: 'silent' },
+      ]))}
+
+      <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '12px 0 8px' }}>SÜSTEEM</div>
+      {row('Lemmik ws', sel('favoriteWorkspace', [
+        { label: 'Kodu', value: 'home' }, { label: 'Töökoda', value: 'workshop' },
+        { label: 'Kontor', value: 'office' }, { label: 'Kood', value: 'coding' },
+        { label: 'Paat', value: 'boat' },
+      ]))}
+      {row('Häälestusviisard', (
+        <button onClick={onResetWizard}
+          style={{ background: `${C.orange}18`, border: `1px solid ${C.orange}50`, color: C.orange, borderRadius: 4, padding: '2px 10px', fontSize: 10, cursor: 'pointer', fontFamily: font }}>
+          KORDA
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ── Peamine HUD ───────────────────────────────────────────────────────────────
 export default function GlassesHUD() {
   const { status, results, loading, audio, analyze, securityAlert } = useJarvis(getDeviceId())
-  const { notifs, add: addNotif, dismiss } = useNotifications()
+  const { notifs, visible: visibleNotifs, add: addNotif, dismiss, clearAll: clearNotifs } = useNotifications()
   const { device, adapter, layout, profile } = useDeviceManager()
+  const { prefs, setPrefs, completeFirstLaunch } = useUserPrefs()
+  const { unlocked, playing: audioPlaying, playBase64, stop: stopAudio } = useAudio()
   const [sphereState, setSphereState] = useState('idle')
   const [listening, setListening]     = useState(false)
   const [interim, setInterim]         = useState('')
@@ -318,21 +436,27 @@ export default function GlassesHUD() {
     else setSphereState('idle')
   }, [listening, loading, audio])
 
-  // Heli
+  // Heli (useAudio = mobiili AudioContext unlock fix)
   useEffect(() => {
     if (!audio) return
-    const blob = new Blob([Uint8Array.from(atob(audio), c => c.charCodeAt(0))], { type: 'audio/mpeg' })
-    const url = URL.createObjectURL(blob)
-    const a = new Audio(url)
-    a.play().catch(() => {})
-    return () => { a.pause(); URL.revokeObjectURL(url) }
+    playBase64(audio, () => setSphereState('idle'))
+    setSphereState('speaking')
+    return () => stopAudio()
   }, [audio])
 
   // Status notifid
   useEffect(() => {
-    if (status === 'online')       addNotif('Albert OS ühendatud', 'success')
+    if (status === 'online')       addNotif('Albert OS ühendatud', 'info')
     if (status === 'disconnected') addNotif('Ühendus katkes — taasühendan...', 'important')
   }, [status])
+
+  // Päevakäivitus: taasta eelmine workspace eelistustest
+  useEffect(() => {
+    if (prefs.firstLaunchDone && prefs.favoriteWorkspace && WORKSPACES[prefs.favoriteWorkspace]) {
+      applyWs(prefs.favoriteWorkspace)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Kõnetuvastus
   const startRec = useCallback(() => {
@@ -376,6 +500,7 @@ export default function GlassesHUD() {
     setWs(id)
     const cfg = WORKSPACES[id]
     applyWorkspace(cfg.wins)
+    setPrefs({ favoriteWorkspace: id })
     addNotif(`Workspace: ${cfg.name}`, 'info')
     // Safe walking/driving: XR layout reeglite alusel sulge mittevajalikud aknad
     if ((id === 'driving' || id === 'walking') && layout?.safeWalkingReduced) {
@@ -447,6 +572,11 @@ export default function GlassesHUD() {
   const [battery, setBattery] = useState(null)
   useEffect(() => { navigator.getBattery?.().then(b => { setBattery(Math.round(b.level * 100)); b.onlevelchange = () => setBattery(Math.round(b.level * 100)) }) }, [])
 
+  // Esimene käivitus — näita nõustajat
+  if (!prefs.firstLaunchDone) {
+    return <FirstLaunchWizard onComplete={completeFirstLaunch} setPrefs={setPrefs} />
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000', overflow: 'hidden', position: 'relative', fontFamily: font }}>
       {/* Taust-grid */}
@@ -491,6 +621,10 @@ export default function GlassesHUD() {
         {/* Subtiitrid */}
         <TopBtn active={subtitles} onClick={() => setSubtitles(s => !s)} title="Subtiitrid">CC</TopBtn>
 
+        {/* Heli olek — näitab kui AudioContext on lukustatud */}
+        {!unlocked && <HUDWidget icon="🔇" value="puuduta" color={C.yellow} label="Heli lubamiseks puuduta ekraani" blink />}
+        {audioPlaying && <HUDWidget icon="🔊" value="RÄÄGIB" color={C.orange} blink />}
+
         {/* Mikrofon */}
         <TopBtn active={listening} onClick={toggleMic} color={listening ? C.red : undefined}>
           {listening ? '🔴' : '🎤'}
@@ -504,10 +638,15 @@ export default function GlassesHUD() {
         background: C.bg, borderRight: `1px solid ${C.border}`,
         backdropFilter: 'blur(12px)', overflowY: 'auto', zIndex: 50,
       }}>
-        <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, marginBottom: 8 }}>NOTIFICATIONS</div>
-        {notifs.length === 0 && <div style={{ fontSize: 11, color: '#333', textAlign: 'center', marginTop: 20 }}>Puhas</div>}
-        {notifs.map(n => (
-          <NotificationCard key={n.id} level={n.level} msg={n.msg} onDismiss={() => dismiss(n.id)} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 9, color: C.textDim, letterSpacing: 2 }}>NOTIFICATIONS</span>
+          {visibleNotifs.length > 0 && (
+            <button onClick={clearNotifs} style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 9, cursor: 'pointer', letterSpacing: 1, fontFamily: font }}>PUHASTA</button>
+          )}
+        </div>
+        {visibleNotifs.length === 0 && <div style={{ fontSize: 11, color: '#333', textAlign: 'center', marginTop: 20 }}>Puhas</div>}
+        {visibleNotifs.map(n => (
+          <NotificationCard key={n.id} level={n.level} msg={n.msg} onDismiss={n.level !== 'critical' ? () => dismiss(n.id) : undefined} />
         ))}
 
         <div style={{ fontSize: 9, color: C.textDim, letterSpacing: 2, margin: '14px 0 8px' }}>WORKSPACE</div>
@@ -561,13 +700,14 @@ export default function GlassesHUD() {
             onPos={pos => setWinPos(id, pos)}
             onSize={size => setWinSize(id, size)}
             onOpacity={o => setWinOpacity(id, o)}>
-            {id === 'jarvis'  && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} />}
-            {id === 'browser' && <BrowserPanel />}
-            {id === 'camera'  && <CameraPanel />}
-            {id === 'notes'   && <NotesPanel notes={notes} onAdd={n => setNotes(p => [n, ...p])} />}
-            {id === 'youtube' && <YouTubePanel />}
-            {id === 'clock'   && <ClockPanel />}
-            {id === 'plugins' && <PluginsPanel />}
+            {id === 'jarvis'   && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} />}
+            {id === 'browser'  && <BrowserPanel />}
+            {id === 'camera'   && <CameraPanel onAnalyze={(img, mode) => analyze({ image: img, mode })} />}
+            {id === 'notes'    && <NotesPanel notes={notes} onAdd={n => setNotes(p => [n, ...p])} />}
+            {id === 'youtube'  && <YouTubePanel />}
+            {id === 'clock'    && <ClockPanel />}
+            {id === 'plugins'  && <PluginsPanel />}
+            {id === 'settings' && <SettingsPanel prefs={prefs} setPrefs={setPrefs} onResetWizard={() => setPrefs({ firstLaunchDone: false })} />}
           </FloatWin>
         ))}
 
@@ -656,6 +796,18 @@ export default function GlassesHUD() {
         }}>
           <span style={{ fontSize: 16 }}>🔌</span>
           <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>PLUGINAD</span>
+        </button>
+
+        {/* Seaded nupp */}
+        <button onClick={() => openWin('settings')} style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+          background: wins['settings']?.open ? `${C.textDim}20` : 'none',
+          border: `1px solid ${wins['settings']?.open ? C.textDim : C.border}`,
+          borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
+          color: wins['settings']?.open ? C.text : C.textDim, minWidth: 56,
+        }}>
+          <span style={{ fontSize: 16 }}>⚙</span>
+          <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>SEADED</span>
         </button>
 
         <div style={{ width: 1, height: 30, background: C.border, margin: '0 4px' }} />

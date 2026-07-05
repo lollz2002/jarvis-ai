@@ -1,10 +1,14 @@
 import { useRef, useState, useEffect } from 'react'
 import { useJarvis } from './hooks/useJarvis'
+import { useDeviceManager } from './hooks/useDeviceManager'
+import { useAudio } from './hooks/useAudio'
 import JarvisSphere from './components/JarvisSphere'
 import Camera from './components/Camera'
 import VoiceInput from './components/VoiceInput'
 import Results from './components/Results'
 import DevicePanel from './components/DevicePanel'
+import FileUpload from './components/FileUpload'
+import RemoteDesktop from './components/RemoteDesktop'
 import './App.css'
 
 function getDeviceId() {
@@ -24,13 +28,18 @@ const MODES = [
 export default function App() {
   const [mode, setMode] = useState('default')
   const [prompt, setPrompt] = useState('')
+  const [attachedFile, setAttachedFile] = useState(null)
   const [sendTarget, setSendTarget] = useState(null)
   const [sphereState, setSphereState] = useState('idle')
   const [showCamera, setShowCamera] = useState(false)
   const [listening, setListening] = useState(false)
+  const [muted, setMuted] = useState(false)
   const cameraRef = useRef(null)
+  const audioRef = useRef(null)
 
-  const { status, devices, agents, results, loading, audio, lastMsg, analyze, sendTo, broadcast } = useJarvis(DEVICE_ID)
+  const { status, devices, agents, results, loading, audio, lastMsg, analyze, sendTo, broadcast, wsRef } = useJarvis(DEVICE_ID)
+  const { device, switchToAR } = useDeviceManager()
+  const { unlocked, playing: audioPlaying, playBase64, stop: stopAudio } = useAudio()
 
   // Sfääri olek oleneb süsteemi olekust
   useEffect(() => {
@@ -40,23 +49,50 @@ export default function App() {
     else setSphereState('idle')
   }, [listening, loading, audio])
 
-  // Pärast häälvastust tagasi idle
+  // Audio mängimine + interrupt tugi (useAudio = mobiili-autoplay fix)
   useEffect(() => {
-    if (audio) {
-      const t = setTimeout(() => setSphereState('idle'), 6000)
-      return () => clearTimeout(t)
-    }
+    if (!audio || muted) return
+    playBase64(audio, () => setSphereState('idle'))
+    setSphereState('speaking')
+    const t = setTimeout(() => setSphereState('idle'), 12000)
+    return () => { stopAudio(); clearTimeout(t) }
   }, [audio])
+
+  function handleInterrupt() {
+    stopAudio()
+    setSphereState('idle')
+  }
 
   useEffect(() => {
     if (lastMsg) alert(`📨 ${lastMsg.from}: ${lastMsg.text}`)
   }, [lastMsg])
 
-  function handleAnalyze(voiceText) {
-    const image = showCamera ? cameraRef.current?.capture() : null
-    const finalPrompt = voiceText || prompt || undefined
+  function getCameraFrame() {
+    return cameraRef.current?.capture() ?? null
+  }
+
+  function handleAnalyze(voiceText, frameFromVoice) {
+    let image = frameFromVoice || (showCamera ? cameraRef.current?.capture() : null)
+    let finalPrompt = voiceText || prompt || undefined
+
+    // Lisa manustatud fail
+    if (attachedFile) {
+      if (attachedFile.type === 'image') {
+        image = attachedFile.data
+      } else {
+        finalPrompt = `${finalPrompt || 'Analysи этот файл'}\n\n[Файл: ${attachedFile.name}]\n${attachedFile.data?.slice(0, 3000)}`
+      }
+      setAttachedFile(null)
+    }
+
+    if (!finalPrompt && !image) return
     analyze({ image, prompt: finalPrompt, mode, target_devices: sendTarget ? [sendTarget] : [] })
     if (!voiceText) setPrompt('')
+  }
+
+  function handleFile(file) {
+    setAttachedFile(file)
+    setPrompt(p => p || `Analysи файл: ${file.name}`)
   }
 
   const statusColor = { online: '#ffaa00', connecting: '#ff6600', disconnected: '#333' }[status]
@@ -73,6 +109,11 @@ export default function App() {
         <div className="header-right">
           <span className="status-dot" style={{ background: statusColor }} />
           <span className="status-text">{status.toUpperCase()}</span>
+          <button onClick={switchToAR} title="Lülitu AR-režiimi (prillid)" style={{
+            background: 'none', border: '1px solid #ffaa0040', color: '#ffaa0088',
+            borderRadius: 5, padding: '2px 8px', cursor: 'pointer',
+            fontSize: '0.65rem', letterSpacing: 1, fontFamily: 'inherit',
+          }}>AR 🥽</button>
         </div>
       </header>
 
@@ -124,6 +165,7 @@ export default function App() {
 
       {/* Ввод */}
       <div className="input-row">
+        <FileUpload onFile={handleFile} disabled={status !== 'online'} />
         <input
           className="text-input"
           placeholder="Ваши команды, сэр..."
@@ -131,6 +173,11 @@ export default function App() {
           onChange={e => setPrompt(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleAnalyze()}
         />
+        {attachedFile && (
+          <span className="file-badge" onClick={() => setAttachedFile(null)} title="Eemalda">
+            📎 {attachedFile.name} ✕
+          </span>
+        )}
       </div>
 
       {/* Кнопки */}
@@ -140,12 +187,18 @@ export default function App() {
         </button>
         <VoiceInput
           onResult={handleAnalyze}
-          disabled={loading || status !== 'online'}
+          disabled={status !== 'online'}
           onListeningChange={setListening}
+          getCameraFrame={showCamera ? getCameraFrame : null}
+          onInterrupt={handleInterrupt}
+          lastResponse={results?.[0]?.response || ''}
         />
         <button className="btn-broadcast" onClick={() => broadcast(prompt || 'JARVIS активирован')}
           disabled={status !== 'online'} title="Kõigile seadmetele">📡</button>
       </div>
+
+      {/* Kaugjuhtimine */}
+      <RemoteDesktop ws={wsRef?.current} onCommand={analyze} />
 
       {/* Tulemused */}
       <Results results={results} loading={loading} audio={audio} />
