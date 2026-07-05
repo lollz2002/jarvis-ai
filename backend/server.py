@@ -655,6 +655,72 @@ def api_secrets_audit():
     """Tagastab millised secrets on konfigureeritud (mitte väärtused)."""
     return {"configured": secret_manager.audit_secrets()}
 
+
+# ── Task & Automation Engine (44_TASK_AND_AUTOMATION_ENGINE_BIBLE.md) ─────────
+from core.task_engine import task_engine, TaskType, TaskPriority
+
+@app.post("/api/v1/tasks")
+async def api_create_task(request: Request):
+    """Loo uus ülesanne. Pöördumatud toimingud pannakse waiting_approval olekusse."""
+    body = await request.json()
+    task = task_engine.create(
+        title=body.get("title", ""),
+        action=body.get("action", ""),
+        project=body.get("project", ""),
+        priority=TaskPriority(body.get("priority", "medium")),
+        due_at=body.get("due_at"),
+        params=body.get("params", {}),
+        recurrence=body.get("recurrence"),
+        dependencies=body.get("dependencies", []),
+    )
+    return task.to_dict()
+
+@app.get("/api/v1/tasks")
+def api_list_tasks(project: str = None, status: str = None, task_type: str = None):
+    return {"tasks": task_engine.list_tasks(project=project, status=status, task_type=task_type)}
+
+@app.get("/api/v1/tasks/{task_id}")
+def api_get_task(task_id: str):
+    task = task_engine.get_task(task_id)
+    if not task:
+        return {"error": "not found"}
+    return task.to_dict()
+
+@app.post("/api/v1/tasks/{task_id}/approve")
+def api_approve_task(task_id: str):
+    return task_engine.approve(task_id)
+
+@app.post("/api/v1/tasks/{task_id}/execute")
+async def api_execute_task(task_id: str):
+    task = await task_engine.execute(task_id)
+    return task.to_dict()
+
+@app.post("/api/v1/tasks/{task_id}/cancel")
+def api_cancel_task(task_id: str):
+    return task_engine.cancel(task_id)
+
+
+# ── Performance & Observability (45_PERFORMANCE_AND_OBSERVABILITY_BIBLE.md) ───
+@app.get("/api/v1/performance/report")
+def api_perf_report():
+    """Performance budgets vs tegelikud mõõdikud."""
+    from core.monitor import get_performance_report
+    return get_performance_report()
+
+@app.get("/api/v1/performance/violations")
+def api_perf_violations(n: int = 20):
+    """Performance budget ületused."""
+    from core.monitor import get_budget_violations
+    return {"violations": get_budget_violations(n)}
+
+@app.post("/api/v1/performance/record")
+async def api_perf_record(request: Request):
+    """Salvesta frontend performance mõõdik (nt AR FPS, startup time)."""
+    from core.monitor import record_perf
+    body = await request.json()
+    record_perf(body.get("metric", ""), body.get("value", 0), body.get("unit", "ms"))
+    return {"ok": True}
+
 @app.post("/security/backup")
 async def sec_backup(request: Request):
     body = await request.json()

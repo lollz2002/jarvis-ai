@@ -1,0 +1,88 @@
+name: Albert OS CI
+
+on:
+  push:
+    branches: [develop, main, "feature/**", "hotfix/**"]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  backend:
+    name: Backend — Lint, Test, Security Scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio ruff bandit
+
+      - name: Lint (ruff)
+        run: ruff check . --select=E,W,F --ignore=E501
+
+      - name: Unit & Integration Tests
+        env:
+          OPENAI_API_KEY: test-placeholder
+          ANTHROPIC_API_KEY: test-placeholder
+          DEVICE_ID: ci-device-001
+        run: pytest tests/ -v --tb=short
+
+      - name: Security Scan (bandit)
+        run: bandit -r . -ll -x tests/,__pycache__/ --quiet
+
+      - name: Secret Scan
+        run: |
+          # Kontrolli et koodis pole hardcoded API võtmeid
+          python -c "
+          import subprocess, sys
+          result = subprocess.run(
+              ['grep', '-r', 'sk-[a-zA-Z0-9]\\{20\\}', '.', '--include=*.py',
+               '--exclude-dir=tests', '--exclude-dir=__pycache__'],
+              capture_output=True, text=True)
+          if result.stdout.strip():
+              print('VIGA: Leitud hardcoded API võtmed:')
+              print(result.stdout)
+              sys.exit(1)
+          print('Secret scan: puhas')
+          "
+
+  frontend:
+    name: Frontend — Type Check, Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  quality-gate:
+    name: Quality Gate
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All checks passed
+        run: echo "CI OK — backend tests, frontend build, security scan all passed"

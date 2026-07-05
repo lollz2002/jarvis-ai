@@ -1,10 +1,13 @@
 """
 Albert OS — Sync Engine
-Spek: 39_NETWORKING_AND_CLOUD_BIBLE.md
+Spek: 39_NETWORKING_AND_CLOUD_BIBLE.md, 43_SYNC_ENGINE_BIBLE.md
 
 Sync Flow:
   Client → LocalDB (instant) → UI update
   SyncEngine → Cloud upload → ACK → mark synchronized
+
+State Machine (43):
+  Idle → DetectChanges → Upload → Download → Resolve → Complete → Idle
 
 Conflict resolution: ConflictResolution (networking.py)
 Offline: sync jätkub automaatselt taasühendamisel
@@ -14,10 +17,21 @@ import logging
 import os
 import time
 from datetime import datetime
+from enum import Enum
 
 from core.networking import networking, NetworkState
 from core.events import emit_sync, MEMORY_UPDATED
 from core.monitor import audit
+
+
+# ── Sync State Machine (spec 43) ──────────────────────────────────────────────
+class SyncState(str, Enum):
+    IDLE           = "idle"
+    DETECT_CHANGES = "detect_changes"
+    UPLOAD         = "upload"
+    DOWNLOAD       = "download"
+    RESOLVE        = "resolve"
+    COMPLETE       = "complete"
 
 log = logging.getLogger("albert.sync")
 
@@ -63,6 +77,7 @@ class SyncEngine:
         self._running    = False
         self._sync_task: asyncio.Task | None = None
         self._last_sync  = 0.0
+        self.state       = SyncState.IDLE
 
     async def start(self, interval_s: float = 120) -> None:
         """Käivita taustal sünkroniseerimise tsükkel."""
@@ -81,24 +96,33 @@ class SyncEngine:
             await self.sync_now()
 
     async def sync_now(self) -> dict:
-        """Sünkroniseeri kõik ootavad muudatused kohe."""
+        """
+        Sünkroniseeri kõik ootavad muudatused kohe.
+        State machine: Idle→DetectChanges→Upload→Download→Resolve→Complete→Idle
+        """
         if not _CLOUD_BASE:
             return {"skipped": True, "reason": "CLOUD_SYNC_URL not configured"}
 
+        # 1. DetectChanges
+        self.state = SyncState.DETECT_CHANGES
         pending = [p for p in _pending if not p["synced"]]
         if not pending:
+            self.state = SyncState.IDLE
             return {"synced": 0}
 
         # Kontrolli ühendust
-        state = await networking.check_connectivity()
-        if state != NetworkState.ONLINE:
+        net_state = await networking.check_connectivity()
+        if net_state != NetworkState.ONLINE:
             log.debug("Sync skipped — offline. Pending: %d", len(pending))
+            self.state = SyncState.IDLE
             return {"skipped": True, "reason": "offline", "pending": len(pending)}
 
         t0 = time.monotonic()
         synced = 0
         failed = 0
 
+        # 2. Upload
+        self.state = SyncState.UPLOAD
         for item in pending:
             result = await networking.request(
                 "POST",
@@ -112,14 +136,36 @@ class SyncEngine:
             else:
                 failed += 1
 
+        # 3. Download (pull remote changes)
+        self.state = SyncState.DOWNLOAD
+        remote_changes = await self.pull()
+
+        # 4. Resolve conflicts
+        self.state = SyncState.RESOLVE
+        if remote_changes:
+            from core.networking import conflict
+            for change in remote_changes:
+                local_match = next(
+                    (p for p in _pending if p.get("record_id") == change.get("record_id")
+                     and p.get("table") == change.get("table")), None)
+                if local_match:
+                    conflict.resolve(local_match.get("data", {}), change.get("data", {}))
+
+        # 5. Complete
+        self.state = SyncState.COMPLETE
         ms = int((time.monotonic() - t0) * 1000)
-        audit("sync_complete", {"synced": synced, "failed": failed, "ms": ms})
-        log.info("Sync: %d synced, %d failed (%dms)", synced, failed, ms)
+        self._last_sync = time.monotonic()
+        audit("sync_complete", {"synced": synced, "failed": failed, "ms": ms,
+                                "remote_changes": len(remote_changes)})
+        log.info("Sync: %d synced, %d failed, %d remote (%dms)",
+                 synced, failed, len(remote_changes), ms)
 
         if synced:
             emit_sync(MEMORY_UPDATED, {"type": "sync", "count": synced}, source="SyncEngine")
 
-        return {"synced": synced, "failed": failed, "ms": ms}
+        self.state = SyncState.IDLE
+        return {"synced": synced, "failed": failed, "ms": ms,
+                "remote_changes": len(remote_changes)}
 
     def status(self) -> dict:
         return {
@@ -127,6 +173,7 @@ class SyncEngine:
             "pending_count": pending_count(),
             "cloud_url":     _CLOUD_BASE or "(not configured)",
             "last_sync":     self._last_sync,
+            "state":         self.state.value,
         }
 
     # ── Pull: laadi muudatused pilvest ────────────────────────────────────────

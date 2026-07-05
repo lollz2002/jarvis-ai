@@ -5,6 +5,39 @@ Formaat: [Semver](https://semver.org) | Kuupäevad: ISO 8601
 
 ---
 
+## [1.0.0-alpha] — 2026-07-05 — Albert OS v1 Alpha
+
+### Added
+- **File 31** UI Bible — Follow-up shortcuts, Camera Compare A/B, winClose animation, Dock keyboard nav
+- **File 32** Code Architecture Bible — Event Bus v2 structured envelope, Repository Pattern, emit_sync
+- **File 33** Provider SDK Bible — ProviderMeta, stream_chat SSE, list_models live API, all 4 adapters
+- **File 34** Autonomous Agent Bible — AgentManager, 6 agent types, safety gates, Progress tracking
+- **File 35** Database Bible — 5 uut tabelit, migration v4, 8 Repository singletonit
+- **File 36** Runtime & Event System Bible — RuntimeKernel, ServiceRegistry, Worker, RuntimeState, 3 background workers
+- **File 37** Android XR Implementation Bible — XRSessionLifecycle 6-state, spatial window contract, feature detection
+- **File 38** Plugin SDK Implementation Bible — SDK v2.0.0, PluginState, hot-plug enable/disable
+- **File 39** Networking & Cloud Bible — NetworkingLayer, ConflictResolution, SyncEngine, mark_dirty
+- **File 40** Security Implementation Bible — SecretManager, RoleManager (RBAC), PromptInjectionDetector, audit events
+- **File 41** Testing & Quality Bible — pytest suite (45 tests): security, events, networking
+- **File 42** DevOps & CI/CD Bible — GitHub Actions CI pipeline (lint→test→build→security scan)
+- **File 43** Sync Engine Bible — SyncState machine (Idle→DetectChanges→Upload→Download→Resolve→Complete)
+- **File 44** Task & Automation Engine Bible — TaskEngine, 6 task types, safety gates, recurring tasks
+- **File 45** Performance & Observability Bible — performance budgets, record_perf(), budget violation tracking
+- **File 47** Albert OS SDK Bible — core/sdk.py public SDK module (kõik SDK-d ühest kohast)
+- **File 49** Release & Versioning Bible — core/version.py semver, version_info()
+
+### Security
+- Prompt injection detection (18 mustrit: EN/ET/RU + DAN/jailbreak)
+- RBAC 5 rolli: User/Administrator/Developer/Plugin/Service
+- Audit events: login, memory_deletion, plugin_install, permission_change, provider_change
+
+### Known Issues
+- Android XR native mode: stub implementatsioon (WebXR probe)
+- Local AI runtime: puudub (v2.0 plaan)
+- Automated E2E tests: osaliselt (backend unit tests olemas, frontend E2E puudub)
+
+---
+
 ## [Unreleased] — develop
 
 ### Added

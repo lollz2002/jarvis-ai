@@ -1,9 +1,16 @@
 """
 Albert OS — Monitoring & Metrics
-Spek: 12_API_AND_INTEGRATION_BIBLE.md
+Spek: 12_API_AND_INTEGRATION_BIBLE.md, 45_PERFORMANCE_AND_OBSERVABILITY_BIBLE.md
 
 Kogub: provider latentsus, vead, retry-d, tööriistade kasutus, mälu timing.
 Ei kogu: isiklikku sisu (ainult metaandmed).
+
+Performance Budgets (spec 45):
+  - App warm start < 3000ms
+  - AR UI >= 60 FPS
+  - Provider routing < 100ms
+  - Memory lookup < 50ms
+  - UI interactions < 20ms
 """
 import time
 from collections import defaultdict, deque
@@ -12,11 +19,22 @@ from threading import Lock
 
 _lock = Lock()
 
+# ── Performance Budgets (spec 45) ─────────────────────────────────────────────
+PERFORMANCE_BUDGETS = {
+    "app_start_ms":       3000,   # App warm start alla 3s
+    "ar_ui_fps":          60,     # AR UI miinimum 60 FPS
+    "provider_routing_ms": 100,   # Provider routing alla 100ms
+    "memory_lookup_ms":   50,     # Memory lookup alla 50ms
+    "ui_interaction_ms":  20,     # UI interaktsioon alla 20ms
+}
+
 # ── Struktuurid ───────────────────────────────────────────────────────────────
-_calls: dict[str, list] = defaultdict(list)     # provider → [{"ms":, "ok":, "intent":, "ts":}]
-_errors: deque = deque(maxlen=200)              # viimased vead
-_tool_usage: dict[str, int] = defaultdict(int) # tool_name → count
-_audit_log: deque = deque(maxlen=500)           # audit sündmused
+_calls: dict[str, list] = defaultdict(list)      # provider → [{"ms":, "ok":, "intent":, "ts":}]
+_errors: deque = deque(maxlen=200)               # viimased vead
+_tool_usage: dict[str, int] = defaultdict(int)   # tool_name → count
+_audit_log: deque = deque(maxlen=500)            # audit sündmused
+_perf_metrics: deque = deque(maxlen=1000)        # performance mõõdikud
+_budget_violations: deque = deque(maxlen=200)    # performance budget ületused
 
 # ── Kirjutamine ───────────────────────────────────────────────────────────────
 def record_call(provider: str, intent: str, ms: int, success: bool, error: str = ""):
@@ -35,6 +53,26 @@ def record_tool(tool_name: str):
     with _lock:
         _tool_usage[tool_name] += 1
     audit("tool_invoked", {"tool": tool_name})
+
+
+def record_perf(metric: str, value: float, unit: str = "ms") -> None:
+    """Salvesta performance mõõdik ja kontrolli budget'i vastu."""
+    entry = {
+        "metric": metric,
+        "value":  value,
+        "unit":   unit,
+        "ts":     datetime.now().isoformat(),
+    }
+    with _lock:
+        _perf_metrics.append(entry)
+        budget_key = metric
+        budget = PERFORMANCE_BUDGETS.get(budget_key)
+        if budget is not None and unit == "ms" and value > budget:
+            _budget_violations.append({
+                **entry,
+                "budget": budget,
+                "exceeded_by": round(value - budget, 1),
+            })
 
 def audit(event: str, data: dict = None):
     """Audit log — olulised sündmused (ei sisalda isiklikku sisu)."""
@@ -101,8 +139,39 @@ def _p95(values: list) -> int:
     return s[idx]
 
 # ── Reset (arendus/test) ──────────────────────────────────────────────────────
+def get_perf_metrics(n: int = 50) -> list:
+    with _lock:
+        return list(_perf_metrics)[-n:]
+
+def get_budget_violations(n: int = 20) -> list:
+    with _lock:
+        return list(_budget_violations)[-n:]
+
+def get_performance_report() -> dict:
+    """Kogub performance kokkuvõtte — budgets vs tegelikud väärtused."""
+    with _lock:
+        report = {"budgets": PERFORMANCE_BUDGETS, "violations": [], "metrics_summary": {}}
+        # Grupeeri metric'ud
+        grouped: dict[str, list] = defaultdict(list)
+        for m in _perf_metrics:
+            grouped[m["metric"]].append(m["value"])
+        for metric, values in grouped.items():
+            report["metrics_summary"][metric] = {
+                "avg":   round(sum(values) / len(values), 1),
+                "max":   max(values),
+                "min":   min(values),
+                "count": len(values),
+                "budget": PERFORMANCE_BUDGETS.get(metric),
+            }
+        report["violations"] = list(_budget_violations)[-10:]
+        report["violation_count"] = len(_budget_violations)
+        return report
+
+
 def reset():
     with _lock:
         _calls.clear()
         _errors.clear()
         _tool_usage.clear()
+        _perf_metrics.clear()
+        _budget_violations.clear()
