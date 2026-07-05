@@ -466,6 +466,30 @@ def api_v1_events(n: int = 50):
     from core.events import get_history
     return {"events": get_history(n)}
 
+@app.get("/api/v1/schema/version")
+def api_schema_version():
+    """Andmebaasi skeemi versioon (35_DATABASE_BIBLE.md — Migration Rules)."""
+    from memory.repositories import memories
+    return {"schema_version": memories.schema_version()}
+
+@app.get("/api/v1/vision/inspections")
+def api_vision_inspections(project: str = None, limit: int = 20):
+    from memory.repositories import vision as vrepo
+    if project:
+        return {"inspections": vrepo.get_by_project(project, limit)}
+    return {"inspections": vrepo.get_recent(limit)}
+
+@app.get("/api/v1/ai-sessions/stats")
+def api_ai_session_stats():
+    from memory.repositories import ai_sessions
+    return {"stats": ai_sessions.get_stats()}
+
+@app.get("/api/v1/agents/tasks/persisted")
+def api_persisted_tasks(status: str = None):
+    """Agendi ülesanded püsivalt DB-st (agent_manager in-memory + DB)."""
+    from memory.repositories import tasks
+    return {"tasks": tasks.list(status=status)}
+
 # ── Agent Manager endpoints (34_AUTONOMOUS_AGENT_BIBLE.md) ───────────────────
 from agents.agent_manager import manager as agent_manager
 

@@ -313,12 +313,22 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
     if text:
         try:
             from memory.memory import add_project_entry
+            from memory.repositories import vision as vrepo, ai_sessions as ai_repo
             if intent == "vision":
                 proj, entry_type = should_save_to_project(
                     vision_mode if intent == "vision" else "general", text)
                 if proj and entry_type:
                     add_project_entry(proj, entry_type,
                                       f"[Vision] {(prompt or '')[:60]} → {text[:200]}")
+                # Salvesta vision_inspections tabelisse (35_DATABASE_BIBLE.md)
+                vrepo.save_inspection(
+                    project=proj or "general",
+                    mode=vision_mode if intent == "vision" else "general",
+                    prompt=prompt or "",
+                    response=text,
+                    confidence=confidence,
+                    image_size_kb=pre.get("size_kb", 0) if image_b64 else 0,
+                )
             elif active_project and intent in (
                 "bmw_diagnostics", "boat_diagnostics", "construction", "diagnostics"
             ):

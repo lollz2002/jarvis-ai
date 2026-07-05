@@ -161,13 +161,83 @@ def _init():
             tags       TEXT DEFAULT '',
             created_at TEXT
         );
+
+        -- ── Visioonanalüüsid (35_DATABASE_BIBLE.md — Vision Domain) ──────────
+        CREATE TABLE IF NOT EXISTS vision_inspections (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project         TEXT DEFAULT '',
+            mode            TEXT DEFAULT 'general',
+            prompt          TEXT DEFAULT '',
+            response        TEXT,
+            confidence      TEXT DEFAULT 'medium',
+            detected_objects TEXT DEFAULT '',
+            ocr_text        TEXT DEFAULT '',
+            image_size_kb   REAL DEFAULT 0,
+            created_at      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_vision_proj ON vision_inspections(project);
+
+        -- ── Hääletranskriptid (35_DATABASE_BIBLE.md — Voice Domain) ─────────
+        CREATE TABLE IF NOT EXISTS voice_transcripts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            device     TEXT DEFAULT '',
+            language   TEXT DEFAULT 'ru',
+            transcript TEXT,
+            summary    TEXT DEFAULT '',
+            duration_s REAL DEFAULT 0,
+            created_at TEXT
+        );
+
+        -- ── AI sessioonid (35_DATABASE_BIBLE.md — AI Session Domain) ─────────
+        CREATE TABLE IF NOT EXISTS ai_sessions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            device        TEXT DEFAULT '',
+            provider      TEXT,
+            model         TEXT DEFAULT '',
+            intent        TEXT DEFAULT '',
+            latency_ms    INTEGER DEFAULT 0,
+            prompt_tokens INTEGER DEFAULT 0,
+            resp_tokens   INTEGER DEFAULT 0,
+            confidence    TEXT DEFAULT 'high',
+            tools_used    TEXT DEFAULT '',
+            created_at    TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_sess_provider ON ai_sessions(provider);
+
+        -- ── Agendi ülesanded (35_DATABASE_BIBLE.md — Task Domain) ────────────
+        CREATE TABLE IF NOT EXISTS agent_tasks (
+            task_id      TEXT PRIMARY KEY,
+            agent_type   TEXT,
+            objective    TEXT,
+            status       TEXT DEFAULT 'pending',
+            progress_pct INTEGER DEFAULT 0,
+            progress_step TEXT DEFAULT '',
+            result       TEXT DEFAULT '',
+            error        TEXT DEFAULT '',
+            project      TEXT DEFAULT '',
+            priority     INTEGER DEFAULT 5,
+            created_at   TEXT,
+            finished_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON agent_tasks(status);
+
+        -- ── Skeemi versioon (migratsioonitabel) ───────────────────────────────
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version    INTEGER PRIMARY KEY,
+            applied_at TEXT,
+            notes      TEXT DEFAULT ''
+        );
+        INSERT OR IGNORE INTO schema_version (version, applied_at, notes)
+            VALUES (1, datetime('now'), 'Initial schema');
         """)
 
 _init()
 
-# Migratsioon: lisa uued veerud olemasolevasse DB-sse
+# ── Migratsioonid (35_DATABASE_BIBLE.md — Migration Rules) ───────────────────
+# Iga muutus: uus versioon + rollback võimalik (safe ALTER TABLE)
 def _migrate():
     with _conn() as c:
+        # v1 → v2: memory_index uued veerud
         for col, definition in [
             ("access_count", "INTEGER DEFAULT 0"),
             ("confidence",   "TEXT DEFAULT 'high'"),
@@ -176,7 +246,34 @@ def _migrate():
             try:
                 c.execute(f"ALTER TABLE memory_index ADD COLUMN {col} {definition}")
             except Exception:
-                pass  # veerg juba eksisteerib
+                pass
+
+        # v2 → v3: projects tabel — type + owner veerud (35_DATABASE_BIBLE.md)
+        for col, definition in [
+            ("type",       "TEXT DEFAULT 'general'"),
+            ("owner",      "TEXT DEFAULT 'albert'"),
+            ("updated_at", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE projects ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+
+        # v3 → v4: conversations — project_id FK ja tool_calls
+        for col, definition in [
+            ("project_id", "INTEGER DEFAULT 0"),
+            ("tool_calls", "TEXT DEFAULT '[]'"),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE conversations ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+
+        try:
+            c.execute("INSERT OR IGNORE INTO schema_version (version, applied_at, notes) VALUES (?, datetime('now'), ?)",
+                      (4, "v1-4: memory_index cols, projects type/owner, conversations project_id/tool_calls"))
+        except Exception:
+            pass
 
 _migrate()
 
