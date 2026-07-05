@@ -18,7 +18,14 @@ from voice.tts import text_to_speech
 from core.plugin_sdk import get_registry
 from core.monitor import get_stats as mon_stats, get_errors, get_tool_usage, get_audit_log, get_provider_health, audit
 from core.adapters import get_adapter, list_adapters
-from core.security import device_trust, rate_limiter, input_sanitizer, is_dangerous_action, create_backup, restore_backup
+from core.security import (
+    device_trust, rate_limiter, input_sanitizer, is_dangerous_action,
+    create_backup, restore_backup,
+    secret_manager, role_manager, injection_detector,
+    get_security_checklist,
+    audit_login, audit_memory_deletion, audit_plugin_install,
+    audit_permission_change, audit_provider_change,
+)
 
 API_VERSION = "v1"
 
@@ -609,6 +616,44 @@ def sec_remove(device_id: str):
 @app.get("/security/rate/{device_id}")
 def sec_rate(device_id: str):
     return rate_limiter.get_usage(device_id)
+
+# ── Security v1 endpoints (40_SECURITY_IMPLEMENTATION_BIBLE.md) ───────────────
+@app.get("/api/v1/security/checklist")
+def api_security_checklist():
+    """Käitusaegne turvakontroll — kõik pass/fail näitajad."""
+    return get_security_checklist()
+
+@app.get("/api/v1/security/roles")
+def api_security_roles():
+    """RBAC rollide ja õiguste maatriks."""
+    return role_manager.roles_info()
+
+@app.post("/api/v1/security/roles/{device_id}")
+async def api_assign_role(device_id: str, request: Request):
+    """Määra rollile seadmele (nõuab Administrator)."""
+    from core.security import Role
+    body = await request.json()
+    role_str = body.get("role", "user")
+    try:
+        role = Role(role_str)
+    except ValueError:
+        return {"error": f"Tundmatu roll: {role_str}. Võimalikud: {[r.value for r in Role]}"}
+    role_manager.assign_role(device_id, role)
+    audit_permission_change(device_id, device_id, "role_assigned", [role_str])
+    return {"ok": True, "device_id": device_id, "role": role.value}
+
+@app.post("/api/v1/security/check-injection")
+async def api_check_injection(request: Request):
+    """Kontrolli teksti prompt injection mustrite vastu."""
+    body = await request.json()
+    text = body.get("text", "")
+    is_injection, patterns = injection_detector.detect(text)
+    return {"is_injection": is_injection, "patterns": patterns, "safe": not is_injection}
+
+@app.get("/api/v1/security/secrets/audit")
+def api_secrets_audit():
+    """Tagastab millised secrets on konfigureeritud (mitte väärtused)."""
+    return {"configured": secret_manager.audit_secrets()}
 
 @app.post("/security/backup")
 async def sec_backup(request: Request):

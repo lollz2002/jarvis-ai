@@ -44,6 +44,8 @@ PLUGIN_LOADED             = "PluginLoaded"
 SESSION_STARTED           = "SessionStarted"
 SESSION_ENDED             = "SessionEnded"
 RESPONSE_COMPOSED         = "ResponseComposed"
+# Security (40_SECURITY_IMPLEMENTATION_BIBLE.md)
+SECURITY_ALERT            = "SecurityAlert"
 
 Handler = Callable[[dict], Awaitable[None]]
 
