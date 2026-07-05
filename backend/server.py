@@ -48,6 +48,14 @@ async def _load_plugins():
     except Exception:
         pass
 
+    # Runtime Kernel käivitus (36_RUNTIME_AND_EVENT_SYSTEM_BIBLE.md)
+    try:
+        from core.runtime import kernel
+        await kernel.start()
+    except Exception as e:
+        import logging
+        logging.getLogger("server").warning("Runtime kernel start warning: %s", e)
+
 # ── Ühendatud seadmed ──────────────────────────────────────────────────────────
 connected_devices: dict[str, WebSocket] = {}
 
@@ -465,6 +473,12 @@ def api_v1_events(n: int = 50):
     """Viimased N sündmust event bus'ist (debug/monitor)."""
     from core.events import get_history
     return {"events": get_history(n)}
+
+@app.get("/api/v1/runtime/status")
+def api_runtime_status():
+    """Runtime Kernel olek: state, uptime, workers, services."""
+    from core.runtime import kernel
+    return kernel.status()
 
 @app.get("/api/v1/schema/version")
 def api_schema_version():
