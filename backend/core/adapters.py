@@ -1,9 +1,10 @@
 """
 Albert OS — Provider Adapter Layer
-Spek: 12_API_AND_INTEGRATION_BIBLE.md
+Spek: 12_API_AND_INTEGRATION_BIBLE.md, 33_PROVIDER_SDK_BIBLE.md
 
-Iga adapter implementeerib BaseAdapter:
-  chat(), vision(), embeddings(), speech_to_text(), text_to_speech(), health_check()
+Iga adapter implementeerib BaseAdapter täieliku Provider Contract'iga:
+  initialize(), health_check(), chat(), stream_chat(), vision(),
+  embeddings(), speech_to_text(), text_to_speech(), list_models()
 
 Äriloogika ei tohi sõltuda konkreetsest providerist — kasuta ainult seda kihti.
 """
@@ -12,19 +13,69 @@ import time
 import asyncio
 import httpx
 from abc import ABC, abstractmethod
+from typing import AsyncIterator
 from core.monitor import record_call
 
 
-class BaseAdapter(ABC):
-    """Ühine liides kõigile AI provideritele."""
-    name: str = "base"
+class ProviderMeta:
+    """Provider metaandmed — capability deklaratsioon (33_PROVIDER_SDK_BIBLE.md)."""
+    def __init__(self, *,
+                 provider_id: str,
+                 supported_models: list[str],
+                 supported_features: list[str],
+                 pricing_class: str,       # 'budget' | 'standard' | 'premium'
+                 latency_class: str,       # 'fast' | 'normal' | 'slow'
+                 max_context: int,
+                 supports_streaming: bool,
+                 supports_vision: bool):
+        self.provider_id       = provider_id
+        self.supported_models  = supported_models
+        self.supported_features = supported_features
+        self.pricing_class     = pricing_class
+        self.latency_class     = latency_class
+        self.max_context       = max_context
+        self.supports_streaming = supports_streaming
+        self.supports_vision   = supports_vision
 
+    def to_dict(self) -> dict:
+        return self.__dict__
+
+
+class BaseAdapter(ABC):
+    """Ühine liides kõigile AI provideritele (Provider Contract v2)."""
+    name: str = "base"
+    meta: ProviderMeta | None = None
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    async def initialize(self) -> bool:
+        """Provider initsialiseerimine (API key kontroll jne). Tagastab True kui OK."""
+        return True
+
+    async def health_check(self) -> dict:
+        """Kontrollib et provider vastab — latentsustest."""
+        t0 = time.monotonic()
+        try:
+            result = await self.chat([{"role": "user", "content": "ping"}], max_tokens=5)
+            ok = result is not None
+        except Exception as e:
+            return {"provider": self.name, "ok": False, "error": str(e), "ms": 0}
+        ms = int((time.monotonic() - t0) * 1000)
+        return {"provider": self.name, "ok": ok, "ms": ms}
+
+    # ── Core methods (implementeerib iga provider) ────────────────────────────
     @abstractmethod
     async def chat(self, messages: list, system: str = "", max_tokens: int = 400) -> str | None:
         """Tekst → tekst. messages = [{"role":"user","content":"..."}]"""
 
+    async def stream_chat(self, messages: list, system: str = "", max_tokens: int = 400) -> AsyncIterator[str]:
+        """Streaming chat — tagastab token generator.
+        Vaikimisi: mittestreamiv fallback (üks chunk)."""
+        result = await self.chat(messages, system=system, max_tokens=max_tokens)
+        if result:
+            yield result
+
     async def vision(self, image_b64: str, prompt: str, system: str = "", max_tokens: int = 400) -> str | None:
-        """Pilt + tekst → tekst. Vaikimisi kasutab chat()."""
+        """Pilt + tekst → tekst."""
         return None
 
     async def embeddings(self, text: str) -> list[float] | None:
@@ -39,17 +90,11 @@ class BaseAdapter(ABC):
         """Tekst → heli."""
         return None
 
-    async def health_check(self) -> dict:
-        """Kontrollib et provider vastab."""
-        t0 = time.monotonic()
-        try:
-            result = await self.chat([{"role": "user", "content": "ping"}], max_tokens=5)
-            ok = result is not None
-        except Exception as e:
-            return {"provider": self.name, "ok": False, "error": str(e), "ms": 0}
-        ms = int((time.monotonic() - t0) * 1000)
-        return {"provider": self.name, "ok": ok, "ms": ms}
+    async def list_models(self) -> list[str]:
+        """Tagastab provider toetatud mudelite nimekirja."""
+        return self.meta.supported_models if self.meta else []
 
+    # ── Internal helpers ──────────────────────────────────────────────────────
     async def _timed_call(self, coro, intent: str = "chat"):
         """Wrapper: mõõdab latentsust + registreerib monitoris."""
         t0 = time.monotonic()
@@ -68,11 +113,24 @@ class BaseAdapter(ABC):
 class OpenAIAdapter(BaseAdapter):
     name = "openai"
     BASE = "https://api.openai.com/v1"
+    meta = ProviderMeta(
+        provider_id="openai",
+        supported_models=["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+        supported_features=["chat", "vision", "embeddings", "tts", "stt", "streaming", "function_calling"],
+        pricing_class="premium",
+        latency_class="normal",
+        max_context=128000,
+        supports_streaming=True,
+        supports_vision=True,
+    )
 
     def __init__(self, model_smart="gpt-4o", model_fast="gpt-4o-mini"):
         self._key = os.getenv("OPENAI_API_KEY", "")
         self.model_smart = model_smart
         self.model_fast  = model_fast
+
+    async def initialize(self) -> bool:
+        return bool(self._key)
 
     def _headers(self):
         return {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
@@ -137,15 +195,57 @@ class OpenAIAdapter(BaseAdapter):
                 return r.json().get("text")
         return None
 
+    async def stream_chat(self, messages: list, system: str = "", max_tokens: int = 400):
+        if not self._key: return
+        msgs = ([{"role": "system", "content": system}] if system else []) + messages
+        async with httpx.AsyncClient(timeout=60) as c:
+            async with c.stream("POST", f"{self.BASE}/chat/completions",
+                    headers=self._headers(),
+                    json={"model": self.model_smart, "max_tokens": max_tokens,
+                          "messages": msgs, "stream": True}) as r:
+                async for line in r.aiter_lines():
+                    if line.startswith("data: ") and line != "data: [DONE]":
+                        import json
+                        try:
+                            delta = json.loads(line[6:])["choices"][0]["delta"]
+                            if "content" in delta and delta["content"]:
+                                yield delta["content"]
+                        except Exception:
+                            pass
+
+    async def list_models(self) -> list[str]:
+        if not self._key: return self.meta.supported_models
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get(f"{self.BASE}/models", headers=self._headers())
+                if r.status_code == 200:
+                    return [m["id"] for m in r.json()["data"] if "gpt" in m["id"]]
+        except Exception:
+            pass
+        return self.meta.supported_models
+
 
 # ── Claude Adapter ────────────────────────────────────────────────────────────
 class ClaudeAdapter(BaseAdapter):
     name = "claude"
     BASE = "https://api.anthropic.com/v1/messages"
+    meta = ProviderMeta(
+        provider_id="claude",
+        supported_models=["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-8"],
+        supported_features=["chat", "vision", "streaming", "long_context"],
+        pricing_class="premium",
+        latency_class="normal",
+        max_context=200000,
+        supports_streaming=True,
+        supports_vision=True,
+    )
 
     def __init__(self, model="claude-sonnet-4-6"):
         self._key  = os.getenv("ANTHROPIC_API_KEY", "")
         self.model = model
+
+    async def initialize(self) -> bool:
+        return bool(self._key)
 
     def _headers(self):
         return {"x-api-key": self._key, "anthropic-version": "2023-06-01",
@@ -171,14 +271,45 @@ class ClaudeAdapter(BaseAdapter):
         ]
         return await self.chat([{"role": "user", "content": content}], system=system, max_tokens=max_tokens)
 
+    async def stream_chat(self, messages: list, system: str = "", max_tokens: int = 400):
+        if not self._key: return
+        body = {"model": self.model, "max_tokens": max_tokens, "messages": messages, "stream": True}
+        if system: body["system"] = system
+        headers = {**self._headers(), "anthropic-beta": "messages-2023-06-01"}
+        async with httpx.AsyncClient(timeout=60) as c:
+            async with c.stream("POST", self.BASE, headers=headers, json=body) as r:
+                async for line in r.aiter_lines():
+                    if line.startswith("data: "):
+                        import json
+                        try:
+                            ev = json.loads(line[6:])
+                            if ev.get("type") == "content_block_delta":
+                                text = ev.get("delta", {}).get("text", "")
+                                if text: yield text
+                        except Exception:
+                            pass
+
 
 # ── Gemini Adapter ────────────────────────────────────────────────────────────
 class GeminiAdapter(BaseAdapter):
     name = "gemini"
+    meta = ProviderMeta(
+        provider_id="gemini",
+        supported_models=["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+        supported_features=["chat", "vision", "streaming", "long_context"],
+        pricing_class="budget",
+        latency_class="fast",
+        max_context=1000000,
+        supports_streaming=True,
+        supports_vision=True,
+    )
 
     def __init__(self, model="gemini-2.5-flash"):
         self._key  = os.getenv("GEMINI_API_KEY", "")
         self.model = model
+
+    async def initialize(self) -> bool:
+        return bool(self._key)
 
     async def chat(self, messages: list, system: str = "", max_tokens: int = 400) -> str | None:
         if not self._key: return None
@@ -227,10 +358,23 @@ class GeminiAdapter(BaseAdapter):
 class PerplexityAdapter(BaseAdapter):
     name = "perplexity"
     BASE = "https://api.perplexity.ai/chat/completions"
+    meta = ProviderMeta(
+        provider_id="perplexity",
+        supported_models=["llama-3.1-sonar-large-128k-online", "llama-3.1-sonar-small-128k-online"],
+        supported_features=["chat", "web_search", "citations"],
+        pricing_class="standard",
+        latency_class="normal",
+        max_context=128000,
+        supports_streaming=False,
+        supports_vision=False,
+    )
 
     def __init__(self, model="llama-3.1-sonar-large-128k-online"):
         self._key  = os.getenv("PERPLEXITY_API_KEY", "")
         self.model = model
+
+    async def initialize(self) -> bool:
+        return bool(self._key)
 
     async def chat(self, messages: list, system: str = "", max_tokens: int = 400) -> str | None:
         if not self._key: return None
@@ -265,6 +409,17 @@ def register_adapter(adapter: BaseAdapter):
 def list_adapters() -> list[str]:
     if not _adapters: _register_defaults()
     return list(_adapters.keys())
+
+def list_adapters_meta() -> list[dict]:
+    """Tagastab kõigi providerite metadata (33_PROVIDER_SDK_BIBLE.md)."""
+    if not _adapters: _register_defaults()
+    result = []
+    for a in _adapters.values():
+        d = {"name": a.name}
+        if a.meta:
+            d.update(a.meta.to_dict())
+        result.append(d)
+    return result
 
 def _register_defaults():
     for cls in [OpenAIAdapter, ClaudeAdapter, GeminiAdapter, PerplexityAdapter]:

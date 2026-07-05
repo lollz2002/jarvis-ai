@@ -282,8 +282,13 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
         text, ws = await _call_provider(primary, prompt, image_b64, system)
         ws_commands.extend(ws)
 
-    # ── Fallback kui primary kukus ────────────────────────────────────────────
+    # ── Retry once + Fallback kui primary kukus (33_PROVIDER_SDK_BIBLE.md) ───
     if not text:
+        # 1. Retry primary korra enne fallback'i
+        text, ws = await _call_provider(primary, prompt, image_b64, system)
+        ws_commands.extend(ws)
+    if not text:
+        # 2. Fallback chain
         for fallback in FALLBACK_CHAIN:
             if fallback == primary: continue
             text, ws = await _call_provider(fallback, prompt, image_b64, system)

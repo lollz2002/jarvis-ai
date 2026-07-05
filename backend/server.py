@@ -454,6 +454,12 @@ def api_v1_health():
 def api_v1_adapters():
     return {"adapters": list_adapters(), "version": API_VERSION}
 
+@app.get("/api/v1/providers/meta")
+def api_v1_providers_meta():
+    """Provider metadata — supported_features, pricing_class, latency_class jne."""
+    from core.adapters import list_adapters_meta
+    return {"providers": list_adapters_meta()}
+
 @app.get("/api/v1/events")
 def api_v1_events(n: int = 50):
     """Viimased N sündmust event bus'ist (debug/monitor)."""
