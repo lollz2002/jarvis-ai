@@ -1051,6 +1051,25 @@ export default function GlassesHUD() {
         <TopBtn active={listening} onClick={toggleMic} color={listening ? C.red : undefined}>
           {listening ? '🔴' : '🎤'}
         </TopBtn>
+
+        {/* Exit Glasses Mode — permanently visible */}
+        <button
+          onClick={() => {
+            try {
+              const p = JSON.parse(localStorage.getItem('albert_os_prefs') || '{}')
+              localStorage.setItem('albert_os_prefs', JSON.stringify({ ...p, glassesMode: false }))
+            } catch { /* ignore */ }
+            window.location.reload()
+          }}
+          style={{
+            background: `${C.red}18`, border: `1px solid ${C.red}60`,
+            color: C.red, borderRadius: 5, padding: '3px 10px',
+            cursor: 'pointer', fontSize: '0.65rem', letterSpacing: 1,
+            fontFamily: font, fontWeight: 600, whiteSpace: 'nowrap',
+          }}
+        >
+          ✕ PHONE
+        </button>
       </div>
 
       {/* ══ VASAKPANEEL — Notifid + Aktiivne projekt ══════════════════════════ */}

@@ -127,20 +127,18 @@ export default function App() {
         <div className="header-right">
           <span className="status-dot" style={{ background: statusColor }} />
           <span className="status-text">{status.toUpperCase()}</span>
-          {/* Glasses Mode toggle — always visible, prominent when XREAL detected */}
           <button
             onClick={toggleGlassesMode}
-            title={prefs.glassesMode ? 'Välju Glasses Mode\'ist' : 'Lülita Glasses Mode sisse (XREAL / AR)'}
             style={{
-              background: prefs.glassesMode ? '#ffaa0025' : isXREALDetected ? '#00aaff20' : 'none',
-              border: `1px solid ${prefs.glassesMode ? '#ffaa0080' : isXREALDetected ? '#00aaff80' : '#ffaa0040'}`,
-              color: prefs.glassesMode ? '#ffaa00' : isXREALDetected ? '#00aaff' : '#ffaa0060',
-              borderRadius: 5, padding: '2px 8px', cursor: 'pointer',
-              fontSize: '0.65rem', letterSpacing: 1, fontFamily: 'inherit',
-              animation: isXREALDetected && !prefs.glassesMode ? 'glassesGlow 1.4s infinite' : 'none',
+              background: '#00aaff18',
+              border: '1px solid #00aaff80',
+              color: '#00aaff',
+              borderRadius: 5, padding: '4px 12px', cursor: 'pointer',
+              fontSize: '0.7rem', letterSpacing: 1, fontFamily: 'inherit',
+              fontWeight: 600,
             }}
           >
-            {prefs.glassesMode ? '🥽 GLASSES ON' : isXREALDetected ? '🥽 XREAL' : '🥽'}
+            🥽 GLASSES MODE
           </button>
         </div>
       </header>
