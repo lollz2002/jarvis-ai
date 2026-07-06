@@ -584,7 +584,7 @@ function SettingsPanel({ prefs, setPrefs, onResetWizard }) {
         </button>
       ))}
       <div style={{ marginTop: 14, padding: '8px 0', borderTop: `1px solid ${C.border}`, fontSize: 9, color: '#333', letterSpacing: 1, textAlign: 'center' }}>
-        ALBERT OS v2.0 · Railway + Vercel
+        ALBERT OS v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'} · {typeof __GIT_HASH__ !== 'undefined' ? __GIT_HASH__ : 'dev'}
       </div>
     </div>
   )

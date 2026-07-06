@@ -255,6 +255,11 @@ export default function App() {
 
       {/* Tulemused */}
       <Results results={results} loading={loading} audio={audio} />
+
+      {/* Build version footer */}
+      <div style={{ textAlign: 'center', padding: '6px 0 2px', fontSize: '0.55rem', color: '#333', letterSpacing: 1 }}>
+        ALBERT OS v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'} · {typeof __GIT_HASH__ !== 'undefined' ? __GIT_HASH__ : 'dev'}
+      </div>
     </div>
   )
 }

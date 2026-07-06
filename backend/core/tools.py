@@ -301,6 +301,24 @@ TOOLS = [
             }, "required": ["query"]}
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_time",
+            "description": "Get the current date and time. Use when user asks 'mis kell on?', 'what time is it?', 'который час?', 'что за дата?', 'kuupäev', 'today', 'сегодня'.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "Perform a mathematical calculation. Use when user asks to compute, calculate, or solve a math expression.",
+            "parameters": {"type": "object", "properties": {
+                "expression": {"type": "string", "description": "Math expression to evaluate, e.g. '2 + 2', '15 * 7', 'sqrt(144)'"}
+            }, "required": ["expression"]}
+        }
+    },
 ]
 
 # ── Käitusaja konfiguratsioon ──────────────────────────────────────────────────
@@ -490,5 +508,24 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
             "args": {"prompt": args.get("prompt", "")},
             "request_id": str(datetime.now().timestamp())
         }
+
+    elif name == "get_current_time":
+        now = datetime.now()
+        time_str = now.strftime("%H:%M:%S")
+        date_str = now.strftime("%d.%m.%Y")
+        weekday = ["esmaspäev","teisipäev","kolmapäev","neljapäev","reede","laupäev","pühapäev"][now.weekday()]
+        return f"Praegu on kell {time_str}, {weekday} {date_str}, сэр.", None
+
+    elif name == "calculate":
+        expr = args.get("expression", "")
+        try:
+            import math
+            safe_globals = {"__builtins__": {}, "sqrt": math.sqrt, "pow": pow,
+                           "abs": abs, "round": round, "int": int, "float": float,
+                           "pi": math.pi, "e": math.e}
+            result = eval(expr, safe_globals)
+            return f"{expr} = {result}, сэр.", None
+        except Exception as ex:
+            return f"Ei suutnud arvutada '{expr}': {ex}", None
 
     return f"Инструмент '{name}' выполнен, сэр.", None
