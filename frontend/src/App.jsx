@@ -44,26 +44,16 @@ export default function App() {
   const { unlocked, playing: audioPlaying, playBase64, stop: stopAudio } = useAudio()
   const { prefs, setPrefs } = useUserPrefs()
 
-  // XREAL auto-detect: DeviceManager sets type='glasses' for 1920×1080 non-mobile, /glasses, or ?ar=1
+  // XREAL detection (informational only — shell selection already happened in main.jsx)
   const isXREALDetected = device.type === 'glasses' || device.isAR
 
-  // Auto-redirect: if XREAL hardware detected OR glassesMode pref active → go to /glasses
-  useEffect(() => {
-    if (window.location.pathname === '/glasses') return
-    if (prefs.glassesMode || isXREALDetected) {
-      setPrefs({ glassesMode: true })
-      window.location.replace('/glasses')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isXREALDetected])
-
+  // Shell swap: write pref then reload so main.jsx boots the correct shell from scratch.
+  // Never navigate to /glasses as a route — it must mount as a separate runtime.
   function toggleGlassesMode() {
-    if (prefs.glassesMode) {
-      setPrefs({ glassesMode: false })
-    } else {
-      setPrefs({ glassesMode: true })
-      window.location.href = '/glasses'
-    }
+    const next = !prefs.glassesMode
+    setPrefs({ glassesMode: next })
+    // Give setPrefs time to flush to localStorage before reload
+    setTimeout(() => window.location.reload(), 50)
   }
 
   // Sfääri olek oleneb süsteemi olekust

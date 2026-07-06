@@ -792,6 +792,18 @@ export default function GlassesHUD() {
   const activeRef = useRef(false)
   const timerRef  = useRef(null)
 
+  // Glasses runtime: lock scroll at document level (reinforces main.jsx, covers HMR reloads)
+  useEffect(() => {
+    const h = document.documentElement, b = document.body
+    const prev = { hO: h.style.overflow, hH: h.style.height, bO: b.style.overflow, bH: b.style.height }
+    h.style.overflow = 'hidden'; h.style.height = '100%'
+    b.style.overflow = 'hidden'; b.style.height = '100%'
+    return () => {
+      h.style.overflow = prev.hO; h.style.height = prev.hH
+      b.style.overflow = prev.bO; b.style.height = prev.bH
+    }
+  }, [])
+
   // Sfääri olek
   useEffect(() => {
     if (listening) setSphereState('listening')
