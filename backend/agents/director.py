@@ -24,7 +24,7 @@ from core.routing_config import INTENT_PATTERNS, PROVIDERS, ROUTING, FALLBACK_CH
 from core.planner import is_complex_request, build_plan, format_plan_for_prompt
 from core.response_composer import (
     compose_parallel_results, compose,
-    cache_get, cache_set,
+    cache_get, cache_set, clean_response,
 )
 from core.events import emit_sync, USER_REQUEST_RECEIVED, PROVIDER_SELECTED, RESPONSE_COMPOSED
 from engines.vision_engine import detect_vision_mode, get_vision_system_prompt, should_save_to_project, preprocess_image
@@ -113,15 +113,16 @@ def apply_confidence_label(text: str, confidence: str, lang: str) -> str:
     return prefix + text
 
 # ── Provideri API kutsed ──────────────────────────────────────────────────────
-async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools=True) -> tuple[str | None, list]:
+async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools=True, history=None) -> tuple[str | None, list]:
     content = []
     if image_b64:
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
-    content.append({"type": "text", "text": prompt or "Анализируй изображение."})
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": content if image_b64 else prompt}
-    ]
+    content.append({"type": "text", "text": prompt or "Mis on pildil?"})
+    messages = [{"role": "system", "content": system}]
+    # Inject conversation history for continuity
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": content if image_b64 else prompt})
     ws_commands = []
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -139,26 +140,31 @@ async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools
                     result_text, ws_cmd = execute_tool(fn_name, fn_args)
                     if ws_cmd: ws_commands.append(ws_cmd)
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result_text})
+                # Use same model for tool result — not mini
                 resp2 = await client.post(OPENAI_URL,
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json={"model": "gpt-4o-mini", "max_tokens": get_cfg("max_tokens", 600), "messages": messages})
+                    json={"model": model, "max_tokens": get_cfg("max_tokens", 600), "messages": messages})
                 if resp2.status_code == 200:
                     return resp2.json()["choices"][0]["message"]["content"], ws_commands
             return msg.get("content"), ws_commands
     except Exception:
         return None, []
 
-async def _call_claude(prompt, image_b64, system, key, model="claude-sonnet-4-6") -> str | None:
+async def _call_claude(prompt, image_b64, system, key, model="claude-sonnet-4-6", history=None) -> str | None:
     content = []
     if image_b64:
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}})
-    content.append({"type": "text", "text": prompt or "Анализируй изображение."})
+    content.append({"type": "text", "text": prompt or "Mis on pildil?"})
+    messages = []
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": content})
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post("https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": model, "max_tokens": get_cfg("max_tokens", 300),
-                      "system": system, "messages": [{"role": "user", "content": content}]})
+                json={"model": model, "max_tokens": get_cfg("max_tokens", 600),
+                      "system": system, "messages": messages})
             if resp.status_code == 200: return resp.json()["content"][0]["text"]
     except Exception: pass
     return None
@@ -172,7 +178,7 @@ async def _call_gemini(prompt, image_b64, key, model="gemini-2.5-flash") -> str 
         if image_b64:
             import base64
             parts.append(types.Part.from_bytes(data=base64.b64decode(image_b64), mime_type="image/jpeg"))
-        parts.append(types.Part.from_text(text=prompt or "Анализируй изображение."))
+        parts.append(types.Part.from_text(text=prompt or "Mis on pildil?"))
         resp = await asyncio.to_thread(
             client.models.generate_content,
             model=model,
@@ -204,7 +210,7 @@ async def _call_perplexity(prompt, system, key, model="llama-3.1-sonar-large-128
     except Exception: pass
     return None
 
-async def _call_provider(provider: str, prompt: str, image_b64: str, system: str) -> tuple[str | None, list]:
+async def _call_provider(provider: str, prompt: str, image_b64: str, system: str, history: list = None) -> tuple[str | None, list]:
     """Kutsub õige provideri API-t."""
     cfg = PROVIDERS.get(provider, {})
     key = os.getenv(cfg.get("env_key", ""), "")
@@ -212,9 +218,9 @@ async def _call_provider(provider: str, prompt: str, image_b64: str, system: str
     model = cfg["models"]["smart"]
     ws = []
     if provider == "openai":
-        text, ws = await _call_openai(prompt, image_b64, system, key, model)
+        text, ws = await _call_openai(prompt, image_b64, system, key, model, history=history)
     elif provider == "claude":
-        text = await _call_claude(prompt, image_b64, system, key, model)
+        text = await _call_claude(prompt, image_b64, system, key, model, history=history)
     elif provider == "gemini":
         text = await _call_gemini(prompt, image_b64, key, model)
     elif provider == "perplexity":
@@ -280,6 +286,13 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
     active_project = detect_active_project(prompt or "")
     routing = ROUTING.get(intent, ROUTING["general"])
 
+    # Load conversation history for LLM continuity (last 4 turns)
+    try:
+        from memory.memory import get_recent_messages
+        history = get_recent_messages(4) if not image_b64 else []
+    except Exception:
+        history = []
+
     emit_sync(USER_REQUEST_RECEIVED, {
         "intent": intent, "lang": lang,
         "has_image": bool(image_b64), "active_project": active_project,
@@ -343,28 +356,30 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
     # ── Paralleelne täitmine + Response Composer ─────────────────────────────
     if run_parallel and verify_with:
         raw_results = await asyncio.gather(
-            _call_provider(primary, prompt, image_b64, system),
-            _call_provider(verify_with, prompt, image_b64, system),
+            _call_provider(primary, prompt, image_b64, system, history),
+            _call_provider(verify_with, prompt, image_b64, system, history),
             return_exceptions=True
         )
         text, ws = compose_parallel_results(raw_results, intent=intent, lang=lang)
         ws_commands.extend(ws)
     else:
-        text, ws = await _call_provider(primary, prompt, image_b64, system)
+        text, ws = await _call_provider(primary, prompt, image_b64, system, history)
         ws_commands.extend(ws)
 
     # ── Retry once + Fallback kui primary kukus (33_PROVIDER_SDK_BIBLE.md) ───
     if not text:
-        # 1. Retry primary korra enne fallback'i
-        text, ws = await _call_provider(primary, prompt, image_b64, system)
+        text, ws = await _call_provider(primary, prompt, image_b64, system, history)
         ws_commands.extend(ws)
     if not text:
-        # 2. Fallback chain
         for fallback in FALLBACK_CHAIN:
             if fallback == primary: continue
-            text, ws = await _call_provider(fallback, prompt, image_b64, system)
+            text, ws = await _call_provider(fallback, prompt, image_b64, system, history)
             ws_commands.extend(ws)
             if text: break
+
+    # ── Clean robotic filler from LLM output ─────────────────────────────────
+    if text:
+        text = clean_response(text)
 
     # ── Confidence strateegia ─────────────────────────────────────────────────
     if text:

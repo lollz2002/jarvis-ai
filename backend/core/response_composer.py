@@ -33,7 +33,11 @@ def clean_response(text: str) -> str:
         return text
     for pattern in _FILLER_RE:
         text = pattern.sub('', text)
-    return text.strip()
+    text = text.strip().strip(',').strip()
+    # Restore sentence-ending period if it was stripped with the address word
+    if text and text[-1] not in '.!?':
+        text += '.'
+    return text
 
 # ── Vastuste vahemälu (in-process, ei püsi taaskäivituse üle) ─────────────────
 _cache: dict[str, tuple[str, float]] = {}  # key → (response, expires_at)

@@ -38,7 +38,7 @@ def _init():
         -- ── Kasutajaprofiil ────────────────────────────────────────────────────
         CREATE TABLE IF NOT EXISTS user_profile (
             id          INTEGER PRIMARY KEY CHECK(id = 1),
-            language    TEXT DEFAULT 'ru',
+            language    TEXT DEFAULT 'et',
             timezone    TEXT DEFAULT 'Europe/Tallinn',
             devices     TEXT DEFAULT '[]',
             permissions TEXT DEFAULT '{}',
@@ -641,6 +641,7 @@ def get_context_for_prompt(prompt: str = "") -> str:
     """
     Pipeline: intent detect → project → knowledge → facts → contacts → notes → recent
     Ranked by importance, truncated to fit prompt window.
+    All labels in Estonian so the LLM doesn't switch to Russian.
     """
     parts = []
     active_project = detect_active_project(prompt) if prompt else None
@@ -648,24 +649,24 @@ def get_context_for_prompt(prompt: str = "") -> str:
     # 1. Faktid
     facts = get_all_facts()
     if facts:
-        parts.append("ИЗВЕСТНЫЕ ФАКТЫ:")
+        parts.append("TEADAOLEVAD FAKTID:")
         for k, v in list(facts.items())[:15]:
             parts.append(f"  {k}: {v}")
 
     # 2. Kontaktid
     contacts = get_all_contacts()
     if contacts:
-        parts.append("\nКОНТАКТЫ:")
+        parts.append("\nKONTAKTID:")
         for ct in contacts[:20]:
             line = f"  {ct['name']}"
-            if ct['phone']: line += f" тел:{ct['phone']}"
+            if ct['phone']: line += f" tel:{ct['phone']}"
             if ct['email']: line += f" email:{ct['email']}"
             parts.append(line)
 
     # 3. Aktiivsed projektid
     projects = get_projects("active")
     if projects:
-        parts.append("\nАКТИВНЫЕ ПРОЕКТЫ:")
+        parts.append("\nAKTIIVSED PROJEKTID:")
         for p in projects[:8]:
             line = f"  [{p['name']}] {p['description']}"
             if p['notes']: line += f" | {p['notes'][:80]}"
@@ -675,7 +676,7 @@ def get_context_for_prompt(prompt: str = "") -> str:
     if active_project:
         entries = get_project_entries(active_project)
         if entries:
-            parts.append(f"\nАКТИВНЫЙ ПРОЕКТ — {active_project}:")
+            parts.append(f"\nAKTIIVNE PROJEKT — {active_project}:")
             for e in entries[:10]:
                 parts.append(f"  [{e['entry_type']}] {e['content'][:120]}")
         # Verstapostid
@@ -703,19 +704,26 @@ def get_context_for_prompt(prompt: str = "") -> str:
     # 6. Viimased märkmed
     recent_notes = get_recent_notes(3)
     if recent_notes:
-        parts.append("\nПОСЛЕДНИЕ ЗАМЕТКИ:")
+        parts.append("\nVIIMASED MÄRKMED:")
         for n in recent_notes:
             parts.append(f"  {n['content'][:120]}")
 
-    # 7. Viimased vestlused
-    recent = get_recent(6)
-    if recent:
-        parts.append("\nПОСЛЕДНИЕ РАЗГОВОРЫ:")
-        for r in recent:
-            parts.append(f"  Пользователь: {r['prompt'][:100]}")
-            parts.append(f"  JARVIS: {r['response'][:100]}")
-
     return "\n".join(parts) if parts else ""
+
+
+def get_recent_messages(n: int = 6) -> list[dict]:
+    """Return last N conversation turns as [{role, content}] for LLM message history."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT prompt, response FROM conversations ORDER BY id DESC LIMIT ?", (n,)
+        ).fetchall()
+    result = []
+    for r in reversed(rows):
+        if r["prompt"]:
+            result.append({"role": "user", "content": r["prompt"]})
+        if r["response"]:
+            result.append({"role": "assistant", "content": r["response"][:400]})
+    return result
 
 # ── Sõidukid ─────────────────────────────────────────────────────────────────
 def save_vehicle(name: str, type: str = "car", make: str = "", model: str = "",
@@ -861,10 +869,11 @@ def init_project_brain():
                     add_knowledge(title, content, category=cat, project=proj["name"])
 
 # ── Context Builder tokenipiirang ─────────────────────────────────────────────
-def get_context_for_prompt(prompt: str = "", max_chars: int = 3000) -> str:
+def get_context_for_prompt(prompt: str = "", max_chars: int = 2000) -> str:
     """
-    Pipeline: intent detect → project → knowledge → facts → contacts → notes → recent
-    Ranked by importance, truncated to max_chars to avoid prompt overload.
+    Pipeline: intent detect → project → knowledge → facts → contacts → notes
+    Ranked by importance, truncated to max_chars.
+    Labels in Estonian to prevent LLM language confusion.
     """
     parts = []
     active_project = detect_active_project(prompt) if prompt else None
@@ -872,24 +881,24 @@ def get_context_for_prompt(prompt: str = "", max_chars: int = 3000) -> str:
     # 1. Faktid (kõrge prioriteet)
     facts = get_all_facts()
     if facts:
-        parts.append("ИЗВЕСТНЫЕ ФАКТЫ:")
+        parts.append("TEADAOLEVAD FAKTID:")
         for k, v in list(facts.items())[:10]:
             parts.append(f"  {k}: {v}")
 
     # 2. Kontaktid
     contacts = get_all_contacts()
     if contacts:
-        parts.append("\nКОНТАКТЫ:")
+        parts.append("\nKONTAKTID:")
         for ct in contacts[:15]:
             line = f"  {ct['name']}"
-            if ct['phone']: line += f" тел:{ct['phone']}"
+            if ct['phone']: line += f" tel:{ct['phone']}"
             if ct['email']: line += f" email:{ct['email']}"
             parts.append(line)
 
     # 3. Aktiivsed projektid (lühiloend)
     projects = get_projects("active")
     if projects:
-        parts.append("\nАКТИВНЫЕ ПРОЕКТЫ:")
+        parts.append("\nAKTIIVSED PROJEKTID:")
         for p in projects[:6]:
             parts.append(f"  [{p['name']}] {p['description'][:80]}")
 
@@ -897,17 +906,17 @@ def get_context_for_prompt(prompt: str = "", max_chars: int = 3000) -> str:
     if active_project:
         entries = get_project_entries(active_project)
         if entries:
-            parts.append(f"\nАКТИВНЫЙ ПРОЕКТ — {active_project}:")
+            parts.append(f"\nAKTIIVNE PROJEKT — {active_project}:")
             for e in entries[:8]:
                 parts.append(f"  [{e['entry_type']}] {e['content'][:100]}")
         milestones = get_milestones(active_project)
         if milestones:
-            parts.append(f"  VERSTAPOSTID:")
+            parts.append("  VERSTAPOSTID:")
             for m in milestones[:4]:
                 parts.append(f"    ○ {m['title']}")
         kbs = search_knowledge(prompt[:60] if prompt else active_project, project=active_project)
         if kbs:
-            parts.append(f"  TEADMISTEBAAS:")
+            parts.append("  TEADMISTEBAAS:")
             for kb in kbs[:3]:
                 parts.append(f"    [{kb['category']}] {kb['title']}: {kb['content'][:80]}")
     elif prompt:
@@ -920,24 +929,13 @@ def get_context_for_prompt(prompt: str = "", max_chars: int = 3000) -> str:
     # 5. Viimased märkmed
     recent_notes = get_recent_notes(3)
     if recent_notes:
-        parts.append("\nПОСЛЕДНИЕ ЗАМЕТКИ:")
+        parts.append("\nVIIMASED MÄRKMED:")
         for n in recent_notes:
             parts.append(f"  {n['content'][:100]}")
 
-    # 6. Viimased vestlused (piiratud)
-    recent = get_recent(4)
-    if recent:
-        parts.append("\nПОСЛЕДНИЕ РАЗГОВОРЫ:")
-        for r in recent:
-            parts.append(f"  Q: {r['prompt'][:80]}")
-            parts.append(f"  A: {r['response'][:80]}")
-
     ctx = "\n".join(parts) if parts else ""
-
-    # Tokenipiirang — lõika max_chars juures et vältida prompti ülekoormust
     if len(ctx) > max_chars:
-        ctx = ctx[:max_chars] + "\n[...kontekst lühendatud...]"
-
+        ctx = ctx[:max_chars] + "\n[kontekst lühendatud]"
     return ctx
 
 # ── Prefs (backwards compat) ──────────────────────────────────────────────────

@@ -12,11 +12,22 @@ AGENTS = {
 }
 
 def _extract_facts(prompt: str):
-    m = re.search(r'меня зовут ([А-ЯЁA-Za-z][а-яёa-z]+)', prompt, re.IGNORECASE)
-    if m: save_fact("user_name", m.group(1))
+    # Estonian
     m = re.search(r'minu nimi on (\w+)', prompt, re.IGNORECASE)
     if m: save_fact("user_name", m.group(1))
+    m = re.search(r'ma elan (\w+)', prompt, re.IGNORECASE)
+    if m: save_fact("user_city", m.group(1))
+    m = re.search(r'minu telefon(?:inumber)? on ([\d\s\+\-]+)', prompt, re.IGNORECASE)
+    if m: save_fact("user_phone", m.group(1).strip())
+    # Russian
+    m = re.search(r'меня зовут ([А-ЯЁA-Za-z][а-яёa-z]+)', prompt, re.IGNORECASE)
+    if m: save_fact("user_name", m.group(1))
     m = re.search(r'я живу в ([А-ЯЁ][а-яё]+)', prompt, re.IGNORECASE)
+    if m: save_fact("user_city", m.group(1))
+    # English
+    m = re.search(r'my name is (\w+)', prompt, re.IGNORECASE)
+    if m: save_fact("user_name", m.group(1))
+    m = re.search(r'i live in (\w+)', prompt, re.IGNORECASE)
     if m: save_fact("user_city", m.group(1))
 
 async def run_smart(image_b64=None, mime="image/jpeg", prompt="", mode="default", model_hint=None):
@@ -57,7 +68,7 @@ def get_agent_list():
 def _default_prompt(mode: str) -> str:
     return {
         "analyze": "Analüüsi pilti ja anna lühike aruanne.",
-        "identify": "Идентифицируй объекты на изображении.",
-        "translate": "Найди текст на изображении и переведи его на русский язык.",
-        "default": "Valmis käskude täitmiseks.",
-    }.get(mode, "Готов к вашим командам, сэр.")
+        "identify": "Tuvasta pildil olevad objektid.",
+        "translate": "Leia pildil olev tekst ja tõlgi see eesti keelde.",
+        "default": "Valmis.",
+    }.get(mode, "Valmis.")
