@@ -16,6 +16,7 @@ import { useWindowManager } from './hooks/useWindowManager'
 import { useDeviceManager } from './hooks/useDeviceManager'
 import { useUserPrefs } from './hooks/useUserPrefs'
 import FirstLaunchWizard from './components/FirstLaunchWizard'
+import BootSequence from './components/BootSequence'
 import { useAudio } from './hooks/useAudio'
 import { useXRSession } from './hooks/useXRSession'
 
@@ -54,26 +55,30 @@ function useNotifications() {
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
+// Driving is NOT a workspace — it's an auto mode triggered by speed.
 const WORKSPACES = {
   home:     { label: '🏠', name: 'Kodu',    wins: { jarvis:true, clock:true, notes:true } },
   workshop: { label: '🔧', name: 'Töökoda', wins: { jarvis:true, camera:true, browser:true } },
   office:   { label: '💼', name: 'Kontor',  wins: { jarvis:true, browser:true, notes:true } },
-  coding:   { label: '💻', name: 'Kood',    wins: { jarvis:true, browser:true, notes:true } },
-  boat:     { label: '⛵', name: 'Paat',    wins: { jarvis:true, camera:true, browser:true } },
-  driving:  { label: '🚗', name: 'Sõit',    wins: { jarvis:true, clock:true } },
-  walking:  { label: '🚶', name: 'Kõndimine', wins: { jarvis:true } },
+  coding:   { label: '💻', name: 'Kood',    wins: { jarvis:true, browser:true, projects:true } },
+  boat:     { label: '⛵', name: 'Paat',    wins: { jarvis:true, camera:true, clock:true } },
 }
 
+// WIN_DEFS: positions calibrated for 1920×1080 XREAL display
+// Left zone  x:8    (AI chat)
+// Right zone x:1582 (browser/camera/notes)
+// Center     free   (world view, floating windows)
 const WIN_DEFS = {
-  jarvis:   { title: 'JARVIS',    icon: '🤖', defaultPos: { x: 320, y: 80 },  w: 320, h: 340 },
-  browser:  { title: 'БРАУЗЕР',   icon: '🌐', defaultPos: { x: 660, y: 80 },  w: 480, h: 360 },
-  camera:   { title: 'КАМЕРА',    icon: '📷', defaultPos: { x: 320, y: 430 }, w: 340, h: 320 },
-  notes:    { title: 'ЗАМЕТКИ',   icon: '📝', defaultPos: { x: 1160, y: 80 }, w: 260, h: 280 },
-  youtube:  { title: 'YOUTUBE',   icon: '▶',  defaultPos: { x: 660, y: 80 },  w: 480, h: 340 },
-  clock:    { title: 'ВРЕМЯ',     icon: '🕐', defaultPos: { x: 1160, y: 380 }, w: 200, h: 90  },
-  plugins:  { title: 'PLUGINAD',  icon: '🔌', defaultPos: { x: 660,  y: 430 }, w: 320, h: 280 },
-  settings: { title: 'SEADED',    icon: '⚙',  defaultPos: { x: 860,  y: 80 },  w: 360, h: 440 },
-  projects: { title: 'PROJEKTID', icon: '📁', defaultPos: { x: 660,  y: 430 }, w: 380, h: 320 },
+  jarvis:   { title: 'JARVIS',    icon: '🤖', defaultPos: { x: 8,    y: 52  }, w: 280, h: 500 },
+  browser:  { title: 'Brauser',   icon: '🌐', defaultPos: { x: 1582, y: 52  }, w: 330, h: 440 },
+  camera:   { title: 'Kaamera',   icon: '📷', defaultPos: { x: 1582, y: 504 }, w: 330, h: 240 },
+  notes:    { title: 'Märkmed',   icon: '📝', defaultPos: { x: 1582, y: 504 }, w: 330, h: 280 },
+  youtube:  { title: 'YouTube',   icon: '▶',  defaultPos: { x: 640,  y: 120 }, w: 640, h: 400 },
+  clock:    { title: 'Kell',      icon: '🕐', defaultPos: { x: 1582, y: 504 }, w: 230, h: 110 },
+  plugins:  { title: 'Pluginad',  icon: '🔌', defaultPos: { x: 640,  y: 200 }, w: 380, h: 320 },
+  settings: { title: 'Seaded',    icon: '⚙',  defaultPos: { x: 640,  y: 120 }, w: 420, h: 500 },
+  projects: { title: 'Projektid', icon: '📁', defaultPos: { x: 1582, y: 52  }, w: 330, h: 380 },
+  memory:   { title: 'Mälu',      icon: '🧠', defaultPos: { x: 640,  y: 200 }, w: 420, h: 440 },
 }
 
 // ── Ujuv aken ─────────────────────────────────────────────────────────────────
@@ -211,37 +216,116 @@ const FOLLOWUP_SHORTCUTS = {
   general:          ['Selgita lähemalt', 'Järgmine samm', 'Salvesta mällu'],
 }
 
-function JarvisPanel({ results, loading, interim, sphereState, onFollowUp, intent }) {
-  const shortcuts = FOLLOWUP_SHORTCUTS[intent] || FOLLOWUP_SHORTCUTS.general
-  const hasResponse = results?.[0]?.response && !loading
+// JarvisPanel — clean chat UI. No mode buttons. Jarvis decides intent automatically.
+function JarvisPanel({ results, loading, interim, sphereState, onSend, onToggleMic, listening }) {
+  const [input, setInput] = useState('')
+  const [history, setHistory] = useState([])  // local [{role,text}]
+  const messagesRef = useRef(null)
+  const prevResultLen = useRef(0)
+
+  // Append new Jarvis responses to local history as they arrive
+  useEffect(() => {
+    const res = results?.[0]
+    if (!res?.response) return
+    setHistory(h => {
+      // Avoid duplicate if same response already appended
+      if (h.length && h[h.length - 1].role === 'jarvis' && h[h.length - 1].text === res.response) return h
+      return [...h, { role: 'jarvis', text: res.response }]
+    })
+  }, [results?.[0]?.response])
+
+  const messages = history
+
+  useEffect(() => {
+    if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight
+  }, [messages.length, loading])
+
+  function send() {
+    const text = input.trim()
+    if (!text) return
+    setHistory(h => [...h, { role: 'user', text }])
+    onSend(text)
+    setInput('')
+  }
+
+  const stateLabel = { idle: 'OOTAN', listening: 'KUULAN...', thinking: 'MÕTLEN...', speaking: 'VASTAN...' }[sphereState] || 'OOTAN'
+  const stateColor = { idle: C.textDim, listening: C.orange, thinking: C.blue, speaking: C.green }[sphereState] || C.textDim
 
   return (
-    <div style={{ padding: 12, height: '100%', display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-        <div style={{ width: 110, height: 110 }}><JarvisSphere state={sphereState} /></div>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Sphere + status strip */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', flexShrink: 0, borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ width: 36, height: 36, flexShrink: 0 }}><JarvisSphere state={sphereState} /></div>
+        <span style={{ fontSize: 9, letterSpacing: 3, color: stateColor, fontFamily: font, transition: 'color 0.3s' }}>{stateLabel}</span>
+        {interim && <span style={{ fontSize: 10, color: C.yellow, fontStyle: 'italic', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>"{interim}"</span>}
       </div>
-      <div style={{ fontSize: 9, letterSpacing: 3, color: C.orange, textAlign: 'center', fontFamily: font, flexShrink: 0 }}>
-        {{ idle: 'ОЖИДАНИЕ', listening: 'СЛУШАЮ...', thinking: 'АНАЛИЗ...', speaking: 'ОТВЕТ...' }[sphereState]}
+
+      {/* Message history */}
+      <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {messages.length === 0 && !loading && (
+          <div style={{ color: C.textDim, fontSize: 11, textAlign: 'center', marginTop: 24, lineHeight: 1.8, fontFamily: font }}>
+            Ütle midagi.<br/>
+            <span style={{ fontSize: 9, letterSpacing: 1, opacity: 0.6 }}>Ava kaamera · Küsi aega · Analüüsi pilti</span>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} style={{
+            display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
+          }}>
+            <div style={{
+              maxWidth: '88%', padding: '7px 11px', borderRadius: m.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+              background: m.role === 'user' ? `${C.orange}22` : 'rgba(255,255,255,0.05)',
+              border: `1px solid ${m.role === 'user' ? C.orange + '50' : C.border}`,
+              fontSize: 12, color: C.text, lineHeight: 1.6, fontFamily: 'system-ui',
+            }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div style={{ padding: '7px 14px', borderRadius: '12px 12px 12px 2px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}` }}>
+              <LoadingDots />
+            </div>
+          </div>
+        )}
       </div>
-      {interim && <div style={{ fontSize: 12, color: C.yellow, fontStyle: 'italic', textAlign: 'center' }}>"{interim}"</div>}
-      {loading && <div style={{ color: C.blue, fontSize: 11, textAlign: 'center' }}>⏳</div>}
-      {hasResponse && (
-        <div style={{ fontSize: 13, color: C.text, lineHeight: 1.65, fontFamily: 'system-ui', overflow: 'auto', flex: 1 }}>
-          {results[0].response}
-        </div>
-      )}
-      {/* Follow-up shortcuts — näita vastuse järel */}
-      {hasResponse && onFollowUp && (
-        <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap' }}>
-          {shortcuts.map(s => (
-            <button key={s} onClick={() => onFollowUp(s)} style={{
-              background: `${C.orange}12`, border: `1px solid ${C.orange}40`,
-              color: C.orange, borderRadius: 12, padding: '3px 8px',
-              fontSize: 9, fontFamily: font, cursor: 'pointer', letterSpacing: 0.5,
-            }}>{s}</button>
-          ))}
-        </div>
-      )}
+
+      {/* Input row — text + mic + camera attach */}
+      <div style={{ display: 'flex', gap: 6, padding: '8px 10px', borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && send()}
+          placeholder="Kirjuta või räägi..."
+          style={{
+            flex: 1, background: 'rgba(255,255,255,0.06)',
+            border: `1px solid ${listening ? C.orange + '80' : C.border}`,
+            borderRadius: 8, color: C.text, padding: '6px 10px',
+            fontSize: 12, fontFamily: 'system-ui', outline: 'none',
+            transition: 'border-color 0.2s',
+          }}
+        />
+        <button onClick={onToggleMic} style={{
+          width: 34, height: 34, borderRadius: 8, border: `1px solid ${listening ? C.red + '80' : C.border}`,
+          background: listening ? `${C.red}20` : 'rgba(255,255,255,0.05)',
+          color: listening ? C.red : C.textDim, cursor: 'pointer', fontSize: 16,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          animation: listening ? 'pulse 0.8s infinite' : 'none',
+          transition: 'all 0.15s', flexShrink: 0,
+        }}>
+          {listening ? '🔴' : '🎤'}
+        </button>
+        {input.trim() && (
+          <button onClick={send} style={{
+            width: 34, height: 34, borderRadius: 8,
+            background: `${C.orange}22`, border: `1px solid ${C.orange}60`,
+            color: C.orange, cursor: 'pointer', fontSize: 16,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>↑</button>
+        )}
+      </div>
     </div>
   )
 }
@@ -763,13 +847,19 @@ export default function GlassesHUD() {
   const [sphereState, setSphereState] = useState('idle')
   const [listening, setListening]     = useState(false)
   const [interim, setInterim]         = useState('')
-  const [ws, setWs]                   = useState('home')
+  const [ws, setWs]                   = useState(() => {
+    try { return JSON.parse(localStorage.getItem('albert_os_prefs') || '{}').favoriteWorkspace || 'home' } catch { return 'home' }
+  })
+  const [booted, setBooted]           = useState(() => !!sessionStorage.getItem('albert_booted'))
+  const [drivingMode, setDrivingMode] = useState(false)
+  const [preDriverWs, setPreDriveWs]  = useState(null)
   const {
     wins, focusedId,
     openWin, closeWin, minimizeWin, maximizeWin, pinWin, focus,
     setWinPos, setWinSize, setWinOpacity,
     applyWorkspace, applySafeWalking, snapWin, closeAll,
-  } = useWindowManager(WIN_DEFS, { jarvis: true, clock: true })
+    getWinsSnapshot, restoreWinsSnapshot,
+  } = useWindowManager(WIN_DEFS, { jarvis: true })
   const [notes, setNotes]             = useState([])
   // Load persisted notes from backend facts (keys prefixed "note_")
   useEffect(() => {
@@ -849,7 +939,7 @@ export default function GlassesHUD() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) return
     const r = new SR()
-    r.lang = prefs.preferredLang || 'ru-RU'; r.interimResults = true; r.continuous = false
+    r.lang = prefs.preferredLang || 'et-EE'; r.interimResults = true; r.continuous = false
     r.onstart = () => setListening(true)
     r.onresult = (e) => {
       let itr = '', fin = ''
@@ -889,18 +979,60 @@ export default function GlassesHUD() {
     analyze({ prompt: text, mode: 'default', model_hint: prefs.preferredAI })
   }
 
+  // Per-workspace state: save current window positions/sizes/open before switching
+  function saveWsState(id) {
+    try {
+      const snapshot = typeof getWinsSnapshot === 'function' ? getWinsSnapshot() : wins
+      const all = JSON.parse(localStorage.getItem('albert_ws_states') || '{}')
+      all[id] = snapshot
+      localStorage.setItem('albert_ws_states', JSON.stringify(all))
+    } catch { /* ignore */ }
+  }
+
+  function loadWsState(id) {
+    try {
+      const all = JSON.parse(localStorage.getItem('albert_ws_states') || '{}')
+      return all[id] || null
+    } catch { return null }
+  }
+
   function applyWs(id) {
+    if (!WORKSPACES[id]) return
+    // Save current workspace state before leaving
+    saveWsState(ws)
     setWs(id)
     const cfg = WORKSPACES[id]
-    applyWorkspace(cfg.wins)
-    setPrefs({ favoriteWorkspace: id })
-    addNotif(`Workspace: ${cfg.name}`, 'info')
-    // Safe walking/driving: liiguta aknad servadesse, vähenda läbipaistvust
-    if (id === 'driving' || id === 'walking') {
-      setTimeout(applySafeWalking, 100) // pärast applyWorkspace'i
-      addNotif('Turvaline režiim: aknad servadesse liigutatud', 'info')
+    // Try to restore saved state for this workspace
+    const saved = loadWsState(id)
+    if (saved && typeof restoreWinsSnapshot === 'function') {
+      restoreWinsSnapshot(saved)
+    } else {
+      applyWorkspace(cfg.wins)
     }
+    setPrefs({ favoriteWorkspace: id })
+    addNotif(`${cfg.label} ${cfg.name}`, 'silent')
   }
+
+  // Driving mode — triggered by Geolocation speed, not a workspace
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    const threshold = prefs.drivingSpeedKmh || 15  // km/h
+    let watchId
+    try {
+      watchId = navigator.geolocation.watchPosition(pos => {
+        const speedKmh = (pos.coords.speed || 0) * 3.6
+        if (speedKmh >= threshold && !drivingMode) {
+          setDrivingMode(true)
+          setPreDriveWs(ws)
+          addNotif('🚗 Sõiturežiim aktiivne', 'info')
+        } else if (speedKmh < threshold / 2 && drivingMode) {
+          setDrivingMode(false)
+          addNotif('🚗 Sõiturežiim lõpetatud', 'info')
+        }
+      }, () => {}, { enableHighAccuracy: false, maximumAge: 4000, timeout: 8000 })
+    } catch { /* ignore — geolocation not available */ }
+    return () => { if (watchId !== undefined) navigator.geolocation.clearWatch(watchId) }
+  }, [drivingMode, prefs.drivingSpeedKmh])
 
   function toggleMic() {
     if (activeRef.current) { activeRef.current = false; clearTimeout(timerRef.current); recogRef.current?.abort(); setListening(false) }
@@ -988,8 +1120,32 @@ export default function GlassesHUD() {
   // XREAL: narrower side panel to give more window space
   const leftW = isXREAL ? 140 : 200
 
+  // Driving mode: dims and simplifies the UI
+  const drivingStyle = drivingMode ? { filter: 'brightness(0.6)', pointerEvents: 'none' } : {}
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000', overflow: 'hidden', position: 'relative', fontFamily: font, fontSize: `${xrScale}em` }}>
+      {/* Boot sequence — shows once per session, skippable */}
+      {!booted && (
+        <BootSequence
+          workspace={WORKSPACES[ws]?.name || 'KODU'}
+          onDone={() => { sessionStorage.setItem('albert_booted', '1'); setBooted(true) }}
+        />
+      )}
+
+      {/* Driving mode overlay */}
+      {drivingMode && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 500, pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.35)',
+        }}>
+          <div style={{
+            fontSize: 48, letterSpacing: 8, color: '#ffaa00', fontFamily: font,
+            textShadow: '0 0 40px #ffaa0060',
+          }}>🚗 SÕITUREŽIIM</div>
+        </div>
+      )}
       {/* Taust-grid */}
       <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', opacity: 0.4 }}>
         <defs><pattern id="g" width="60" height="60" patternUnits="userSpaceOnUse"><path d="M60 0L0 0 0 60" fill="none" stroke="#ffffff08" strokeWidth="0.5"/></pattern></defs>
@@ -1144,7 +1300,7 @@ export default function GlassesHUD() {
             onSize={size => setWinSize(id, size)}
             onOpacity={o => setWinOpacity(id, o)}
             onSnap={to => snapWin(id, to)}>
-            {id === 'jarvis'   && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} intent={lastIntent} onFollowUp={txt => { setLastIntent(lastIntent); analyze({ prompt: txt, mode: 'default', model_hint: prefs.preferredAI }) }} />}
+            {id === 'jarvis'   && <JarvisPanel results={results} loading={loading} interim={subtitles ? interim : ''} sphereState={sphereState} listening={listening} onSend={txt => handleCmd(txt)} onToggleMic={toggleMic} />}
             {id === 'browser'  && <BrowserPanel />}
             {id === 'camera'   && <CameraPanel onAnalyze={(img, mode) => analyze({ image: img, mode, model_hint: prefs.preferredAI })} />}
             {id === 'notes'    && <NotesPanel notes={notes} onAdd={n => {
