@@ -47,12 +47,15 @@ export default function App() {
   // XREAL auto-detect: DeviceManager sets type='glasses' for 1920×1080 non-mobile, /glasses, or ?ar=1
   const isXREALDetected = device.type === 'glasses' || device.isAR
 
-  // If Glasses Mode pref is active, redirect to /glasses immediately
+  // Auto-redirect: if XREAL hardware detected OR glassesMode pref active → go to /glasses
   useEffect(() => {
-    if (prefs.glassesMode && window.location.pathname !== '/glasses') {
+    if (window.location.pathname === '/glasses') return
+    if (prefs.glassesMode || isXREALDetected) {
+      setPrefs({ glassesMode: true })
       window.location.replace('/glasses')
     }
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isXREALDetected])
 
   function toggleGlassesMode() {
     if (prefs.glassesMode) {

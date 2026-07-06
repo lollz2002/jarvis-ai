@@ -614,6 +614,144 @@ function useWeather() {
   return weather
 }
 
+// ── macOS-style Dock ──────────────────────────────────────────────────────────
+const DOCK_APPS = [
+  { id: 'browser',  icon: '🌐', label: 'Brauser'  },
+  { id: 'camera',   icon: '📷', label: 'Kaamera'  },
+  { id: 'jarvis',   icon: '🤖', label: 'JARVIS'   },
+  { id: 'projects', icon: '📁', label: 'Projektid' },
+  { id: 'memory',   icon: '🧠', label: 'Mälu'     },
+  { id: 'youtube',  icon: '▶',  label: 'YouTube'  },
+  { id: 'settings', icon: '⚙',  label: 'Seaded'   },
+]
+
+function DockIcon({ appId, icon, label, isActive, hoveredIdx, selfIdx, onOpen }) {
+  const [hovered, setHovered] = useState(false)
+  const dist = hoveredIdx !== null ? Math.abs(hoveredIdx - selfIdx) : 99
+  const size = dist === 0 ? 58 : dist === 1 ? 50 : 40
+
+  return (
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Tooltip */}
+      {hovered && (
+        <div style={{
+          position: 'absolute', bottom: size + 10, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.85)', color: C.text, fontSize: 10, letterSpacing: 1,
+          padding: '3px 8px', borderRadius: 5, whiteSpace: 'nowrap', pointerEvents: 'none',
+          border: `1px solid ${C.border}`, fontFamily: 'monospace', zIndex: 200,
+        }}>
+          {label}
+        </div>
+      )}
+
+      {/* Icon button */}
+      <button
+        onClick={() => onOpen(appId)}
+        style={{
+          width: size, height: size, borderRadius: 14,
+          background: isActive ? `${C.orange}22` : hovered ? `${C.blue}18` : 'rgba(255,255,255,0.05)',
+          border: `1px solid ${isActive ? C.orange : hovered ? C.blue : C.border}`,
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: dist === 0 ? 26 : dist === 1 ? 22 : 18,
+          transition: 'all 0.12s cubic-bezier(0.34,1.56,0.64,1)',
+          color: C.text,
+        }}
+      >
+        {icon}
+      </button>
+
+      {/* Active dot */}
+      {isActive && (
+        <div style={{
+          width: 4, height: 4, borderRadius: '50%', background: C.orange,
+          marginTop: 3, transition: 'opacity 0.2s',
+        }} />
+      )}
+    </div>
+  )
+}
+
+function MacDock({ wins, ws, listening, onOpenWin, onApplyWs, onToggleMic, leftW }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null)
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 0, left: leftW, right: 0, height: 72,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      gap: 6, zIndex: 100, paddingBottom: 8,
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(20px)',
+      borderTop: `1px solid ${C.border}`,
+    }}>
+      {/* Workspace switcher group */}
+      <div style={{ display: 'flex', gap: 4, marginRight: 8 }}>
+        {Object.entries(WORKSPACES).map(([id, def]) => (
+          <button
+            key={id}
+            onClick={() => onApplyWs(id)}
+            title={def.name}
+            style={{
+              width: 34, height: 34, borderRadius: 10,
+              background: ws === id ? `${C.blue}30` : 'rgba(255,255,255,0.05)',
+              border: `1px solid ${ws === id ? C.blue : C.border}`,
+              cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: C.text, transition: 'all 0.12s',
+            }}
+          >
+            {def.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Divider */}
+      <div style={{ width: 1, height: 36, background: C.border, margin: '0 6px' }} />
+
+      {/* App icons */}
+      {DOCK_APPS.map((app, idx) => (
+        <div
+          key={app.id}
+          onMouseEnter={() => setHoveredIdx(idx)}
+          onMouseLeave={() => setHoveredIdx(null)}
+        >
+          <DockIcon
+            appId={app.id}
+            icon={app.icon}
+            label={app.label}
+            isActive={!!wins[app.id]?.open}
+            hoveredIdx={hoveredIdx}
+            selfIdx={idx}
+            onOpen={onOpenWin}
+          />
+        </div>
+      ))}
+
+      {/* Divider */}
+      <div style={{ width: 1, height: 36, background: C.border, margin: '0 6px' }} />
+
+      {/* Mic button */}
+      <button
+        onClick={onToggleMic}
+        title={listening ? 'Mikrofon aktiivne' : 'Mikrofon'}
+        style={{
+          width: listening ? 46 : 40, height: listening ? 46 : 40,
+          borderRadius: 13, cursor: 'pointer',
+          background: listening ? `${C.red}25` : 'rgba(255,255,255,0.05)',
+          border: `1px solid ${listening ? C.red : C.border}`,
+          fontSize: listening ? 22 : 18,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: listening ? C.red : C.textDim,
+          animation: listening ? 'pulse 0.8s infinite' : 'none',
+          transition: 'all 0.15s',
+        }}
+      >
+        {listening ? '🔴' : '🎤'}
+      </button>
+    </div>
+  )
+}
+
 // ── Peamine HUD ───────────────────────────────────────────────────────────────
 export default function GlassesHUD() {
   const { status, results, loading, audio, analyze, securityAlert, wsRef } = useJarvis(getDeviceId())
@@ -1037,85 +1175,16 @@ export default function GlassesHUD() {
         )}
       </div>
 
-      {/* ══ BOTTOM DOCK ══════════════════════════════════════════════════════ */}
-      <div style={{
-        position: 'absolute', bottom: 0, left: leftW, right: 160, height: 52,
-        background: C.bg, borderTop: `1px solid ${C.border}`,
-        backdropFilter: 'blur(20px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 8, zIndex: 100,
-      }}>
-        {[
-          { id: 'browser', icon: '🌐', label: 'Brauser' },
-          { id: 'camera',  icon: '📷', label: 'Kaamera' },
-          { id: 'notes',   icon: '📝', label: 'Märkmed' },
-          { id: 'youtube', icon: '▶',  label: 'YouTube'  },
-          { id: 'clock',   icon: '🕐', label: 'Kell'    },
-        ].map(({ id, icon, label }) => (
-          <button key={id} tabIndex={0} onKeyDown={e => e.key === 'Enter' && openWin(id)} onClick={() => openWin(id)} style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-            background: wins[id]?.open ? `${C.orange}20` : 'none',
-            border: `1px solid ${wins[id]?.open ? C.orange : C.border}`,
-            borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
-            color: wins[id]?.open ? C.orange : C.textDim,
-            transition: 'all 0.15s', minWidth: 56,
-          }}>
-            <span style={{ fontSize: 16 }}>{icon}</span>
-            <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>{label}</span>
-          </button>
-        ))}
-
-        {/* Pluginad nupp */}
-        <button onClick={() => openWin('plugins')} style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          background: wins['plugins']?.open ? `${C.blue}20` : 'none',
-          border: `1px solid ${wins['plugins']?.open ? C.blue : C.border}`,
-          borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
-          color: wins['plugins']?.open ? C.blue : C.textDim, minWidth: 56,
-        }}>
-          <span style={{ fontSize: 16 }}>🔌</span>
-          <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>PLUGINAD</span>
-        </button>
-
-        {/* Projektid nupp */}
-        <button onClick={() => openWin('projects')} style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          background: wins['projects']?.open ? `${C.orange}20` : 'none',
-          border: `1px solid ${wins['projects']?.open ? C.orange : C.border}`,
-          borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
-          color: wins['projects']?.open ? C.orange : C.textDim, minWidth: 56,
-        }}>
-          <span style={{ fontSize: 16 }}>📁</span>
-          <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>PROJEKTID</span>
-        </button>
-
-        {/* Seaded nupp */}
-        <button onClick={() => openWin('settings')} style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          background: wins['settings']?.open ? `${C.textDim}20` : 'none',
-          border: `1px solid ${wins['settings']?.open ? C.textDim : C.border}`,
-          borderRadius: 8, padding: '5px 10px', cursor: 'pointer',
-          color: wins['settings']?.open ? C.text : C.textDim, minWidth: 56,
-        }}>
-          <span style={{ fontSize: 16 }}>⚙</span>
-          <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>SEADED</span>
-        </button>
-
-        <div style={{ width: 1, height: 30, background: C.border, margin: '0 4px' }} />
-
-        {/* Mikrofon */}
-        <button onClick={toggleMic} style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          background: listening ? `${C.red}20` : 'none',
-          border: `1px solid ${listening ? C.red : C.border}`,
-          borderRadius: 8, padding: '5px 12px', cursor: 'pointer',
-          color: listening ? C.red : C.textDim, minWidth: 56,
-          animation: listening ? 'pulse 0.8s infinite' : 'none',
-        }}>
-          <span style={{ fontSize: 16 }}>{listening ? '🔴' : '🎤'}</span>
-          <span style={{ fontSize: 8, letterSpacing: 1, fontFamily: font }}>MIK</span>
-        </button>
-      </div>
+      {/* ══ BOTTOM DOCK — macOS style ════════════════════════════════════════ */}
+      <MacDock
+        wins={wins}
+        ws={ws}
+        listening={listening}
+        onOpenWin={openWin}
+        onApplyWs={applyWs}
+        onToggleMic={toggleMic}
+        leftW={leftW}
+      />
 
       <style>{`
         @keyframes fadeIn    { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
