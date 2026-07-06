@@ -32,20 +32,34 @@ from engines.vision_engine import detect_vision_mode, get_vision_system_prompt, 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
 # ── 1. Keele tuvastus ─────────────────────────────────────────────────────────
+_ET_WORDS = {
+    "kas", "ma", "ta", "on", "ei", "ja", "see", "mis", "mida", "kuidas",
+    "ava", "sulge", "tee", "sa", "me", "te", "nad", "mul", "sul", "tal",
+    "kell", "aeg", "ilm", "mis", "kus", "miks", "millal", "palju", "päev",
+    "nädal", "kuu", "aasta", "tere", "aitäh", "ole", "oled", "olen",
+    "mäletad", "salvesta", "tõlgi", "arvuta", "leia", "näita", "aita",
+    "kuidas", "mida", "millega", "praegu", "täna", "homme", "eile",
+}
+_EN_WORDS = {
+    "the", "is", "are", "what", "how", "can", "open", "close", "find",
+    "show", "make", "help", "tell", "give", "please", "translate", "calculate",
+}
+
 def detect_language(text: str) -> str:
-    if not text: return "ru"
-    et = sum(1 for w in ["kas", "ma", "ta", "on", "ei", "ja", "see", "mis", "mida", "kuidas", "ava", "sulge", "tee"] if w in text.lower().split())
-    en = sum(1 for w in ["the", "is", "are", "what", "how", "can", "open", "close", "find", "show", "make"] if w in text.lower().split())
+    if not text: return "et"
+    words = set(text.lower().split())
     ru = sum(1 for ch in text if 'Ѐ' <= ch <= 'ӿ')
-    if et >= 2: return "et"
-    if en >= 2: return "en"
     if ru >= 3: return "ru"
-    return "ru"
+    et = len(words & _ET_WORDS)
+    en = len(words & _EN_WORDS)
+    if et >= 1: return "et"
+    if en >= 2: return "en"
+    return "et"  # default: Estonian
 
 # ── 2. Intent klassifitseerimine ──────────────────────────────────────────────
 # Prioriteetne järjestus: spetsiifilisemad intentid enne üldisemaid
 _INTENT_PRIORITY = [
-    "bmw_diagnostics", "boat_diagnostics", "construction",
+    "boat_diagnostics", "bmw_diagnostics", "construction",
     "vision", "coding", "research", "translation", "planning",
     "business", "calendar", "device_control", "diagnostics",
 ]
@@ -111,7 +125,7 @@ async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools
     ws_commands = []
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            body = {"model": model, "max_tokens": get_cfg("max_tokens", 300), "messages": messages}
+            body = {"model": model, "max_tokens": get_cfg("max_tokens", 600), "messages": messages}
             if use_tools: body.update({"tools": TOOLS, "tool_choice": "auto"})
             resp = await client.post(OPENAI_URL,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=body)
@@ -127,7 +141,7 @@ async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result_text})
                 resp2 = await client.post(OPENAI_URL,
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json={"model": "gpt-4o-mini", "max_tokens": get_cfg("max_tokens", 300), "messages": messages})
+                    json={"model": "gpt-4o-mini", "max_tokens": get_cfg("max_tokens", 600), "messages": messages})
                 if resp2.status_code == 200:
                     return resp2.json()["choices"][0]["message"]["content"], ws_commands
             return msg.get("content"), ws_commands
@@ -209,8 +223,58 @@ async def _call_provider(provider: str, prompt: str, image_b64: str, system: str
         text = None
     return text, ws
 
+# ── Tool pre-forcing — fast path for simple tool queries ─────────────────────
+_TIME_KEYWORDS = {
+    "kell", "kellaaeg", "aeg", "kuupäev", "kuupaev", "mis kell", "praegu",
+    "time", "clock", "date", "what time", "current time",
+    "время", "сейчас", "дата",
+}
+_CALC_KEYWORDS = {"arvuta", "calculate", "калькулятор", "вычисли", "+", "-", "*", "/", "%"}
+
+def _try_tool_fast_path(prompt: str) -> tuple[str, list] | None:
+    """Returns (answer, []) if the query can be answered by a tool directly, else None."""
+    if not prompt:
+        return None
+    p_lower = prompt.lower()
+    words = set(p_lower.split())
+
+    # Time/date query
+    if any(kw in p_lower for kw in _TIME_KEYWORDS):
+        result, ws = execute_tool("get_current_time", {})
+        if result:
+            return result, ws or []
+
+    # Calculation query — only if there's an actual math expression
+    import re as _re
+    # Handle "X + Y%" → X * (1 + Y/100) or "X * Y%" → X * Y/100
+    pct_match = _re.search(r'([\d,.]+)\s*([\+\-])\s*([\d,.]+)\s*%', prompt)
+    if pct_match and any(kw in p_lower for kw in _CALC_KEYWORDS):
+        base = float(pct_match.group(1).replace(",", "."))
+        op = pct_match.group(2)
+        pct = float(pct_match.group(3).replace(",", "."))
+        if op == '+':
+            val = base * (1 + pct / 100)
+        else:
+            val = base * (1 - pct / 100)
+        return f"{base} {op} {pct}% = {round(val, 2)}", []
+    math_match = _re.search(r'[\d,.]+\s*[\+\-\*\/]\s*[\d,.]+', prompt)
+    if math_match and any(kw in p_lower for kw in _CALC_KEYWORDS):
+        expr_raw = math_match.group(0).replace(",", ".").replace(" ", "")
+        result, ws = execute_tool("calculate", {"expression": expr_raw})
+        if result:
+            return result, ws or []
+
+    return None
+
+
 # ── Peamine Director ───────────────────────────────────────────────────────────
 async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "", model_hint: str = None) -> tuple[str, list]:
+    # Fast path: answer time/calc directly from tools without LLM call
+    if not image_b64:
+        fast = _try_tool_fast_path(prompt)
+        if fast:
+            return fast
+
     lang   = detect_language(prompt or "")
     intent = classify_intent(prompt or "", bool(image_b64))
     active_project = detect_active_project(prompt or "")
@@ -358,7 +422,10 @@ async def run_with_tools(prompt: str, image_b64: str = None, memory_ctx: str = "
         "intent": intent, "provider": primary, "confidence": confidence,
         "response_len": len(text or ""), "lang": lang,
     })
-    return text or "Все системы недоступны, сэр.", ws_commands
+    if not text:
+        _no_resp = {"et": "Kõik süsteemid on kättesaamatud.", "ru": "Все системы недоступны.", "en": "All systems unavailable."}
+        text = _no_resp.get(lang, _no_resp["et"])
+    return text, ws_commands
 
 
 async def decide_routing(prompt: str, has_image: bool) -> dict:
@@ -378,4 +445,4 @@ async def decide_routing(prompt: str, has_image: bool) -> dict:
 
 async def synthesize(prompt: str, results: list, memory_ctx: str = "") -> str:
     valid = [r for r in results if r.get("response")]
-    return valid[0]["response"] if valid else "Системы недоступны, сэр."
+    return valid[0]["response"] if valid else "Süsteemid pole kättesaadavad."

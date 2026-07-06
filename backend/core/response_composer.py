@@ -10,8 +10,30 @@ Vastutab:
   - Vahemälu (TTL-põhine, mälusisene)
 """
 import hashlib
+import re
 import time
 from difflib import SequenceMatcher
+
+# ── Robotic filler removal ────────────────────────────────────────────────────
+_FILLER_PATTERNS = [
+    # Trailing address words (various positions)
+    r',?\s*сэр\.?$', r',?\s*sir\.?$', r',?\s*härra\.?$',
+    r',?\s*сэр\b', r',?\s*sir\b', r',?\s*härra\b',
+    # Opening filler
+    r'^(Конечно|Разумеется|Of course|Certainly|Muidugi|Loomulikult)[!,.]?\s*',
+    r'^(Analysis complete[,.]\s*)', r'^(Noted[,.]\s*)',
+    r'^(Хорошо|Понял|Understood)[,.]?\s*',
+]
+_FILLER_RE = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in _FILLER_PATTERNS]
+
+
+def clean_response(text: str) -> str:
+    """Strip robotic filler phrases and address words from a response."""
+    if not text:
+        return text
+    for pattern in _FILLER_RE:
+        text = pattern.sub('', text)
+    return text.strip()
 
 # ── Vastuste vahemälu (in-process, ei püsi taaskäivituse üle) ─────────────────
 _cache: dict[str, tuple[str, float]] = {}  # key → (response, expires_at)
@@ -98,14 +120,14 @@ def compose(primary: str | None, secondary: str | None,
       4. Kui vastukäivad — lisa hoiatus + mõlemad lühidalt.
       5. Kui täiendavad — ühenda: primary + secondary unikaalne info.
     """
-    primary   = (primary   or "").strip()
-    secondary = (secondary or "").strip()
+    primary   = clean_response((primary   or "").strip())
+    secondary = clean_response((secondary or "").strip())
 
     if not primary and not secondary:
         _no_response = {
-            "ru": "Все системы недоступны, сэр.",
-            "et": "Kõik süsteemid on kättesaamatud, härra.",
-            "en": "All systems unavailable, sir.",
+            "ru": "Kõik süsteemid on kättesaamatud.",
+            "et": "Kõik süsteemid on kättesaamatud.",
+            "en": "All systems unavailable.",
         }
         return _no_response.get(lang, _no_response["ru"])
 

@@ -21,7 +21,7 @@ def get_config(key: str, default=None):
 
 def set_config(key: str, value):
     _runtime_config[key] = value
-    return f"Параметр '{key}' изменён на '{value}', сэр."
+    return f"Parameeter '{key}' muudetud: '{value}'."
 
 def get_all_config() -> dict:
     return dict(_runtime_config)

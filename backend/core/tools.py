@@ -345,28 +345,28 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
 
     if name == "change_voice_speed":
         _config["voice_speed"] = args.get("speed", 0.95)
-        return f"Скорость речи изменена на {args['speed']}, сэр.", None
+        return f"Kõne kiirus muudetud: {args['speed']}.", None
 
     elif name == "change_voice":
         engine = args.get("engine", "openai")
         voice_id = args.get("voice_id", "onyx")
         _config["voice_engine"] = engine
         _config["voice_id"] = voice_id
-        return f"Голос изменён, сэр. Движок: {engine}, голос: {voice_id}.", None
+        return f"Hääl muudetud. Mootor: {engine}, hääl: {voice_id}.", None
 
     elif name == "phone_call":
         number = args.get("number", "")
         contact = args.get("name", number)
-        return f"Звоню {contact}, сэр.", {"type": "phone_call", "number": number, "name": contact}
+        return f"Helistan {contact}.", {"type": "phone_call", "number": number, "name": contact}
 
     elif name == "phone_sms":
         number = args.get("number", "")
         body = args.get("body", "")
-        return f"Отправляю SMS на {number}, сэр.", {"type": "phone_sms", "number": number, "body": body}
+        return f"Saadan SMS numbrile {number}.", {"type": "phone_sms", "number": number, "body": body}
 
     elif name == "phone_email":
         to = args.get("to", "")
-        return f"Открываю почту для {to}, сэр.", {
+        return f"Avan meili: {to}.", {
             "type": "phone_email", "to": to,
             "subject": args.get("subject", ""), "body": args.get("body", "")
         }
@@ -380,44 +380,42 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
             "maps": f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
         }
         url = urls.get(engine, urls["google"])
-        return f"Выполняю поиск: {query}", {"type": "browser_open", "url": url}
+        return f"Otsin: {query}", {"type": "browser_open", "url": url}
 
     elif name == "open_url":
         url = args.get("url", "")
-        return f"Открываю {url}, сэр.", {"type": "browser_open", "url": url}
+        return f"Avan {url}.", {"type": "browser_open", "url": url}
 
     elif name == "remember_fact":
         save_fact(args["key"], args["value"])
-        return f"Запомнил: {args['key']} = {args['value']}, сэр.", None
+        return f"Salvestatud: {args['key']} = {args['value']}.", None
 
     elif name == "forget_fact":
         forget_fact(args["key"])
-        return f"Удалил из памяти: {args['key']}, сэр.", None
+        return f"Kustutatud mälust: {args['key']}.", None
 
     elif name == "add_project_entry":
         add_project_entry(args["project_name"], args["entry_type"], args["content"])
-        return f"Добавлено в проект '{args['project_name']}' [{args['entry_type']}]: {args['content'][:60]}, сэр.", None
+        return f"Lisatud projekti '{args['project_name']}' [{args['entry_type']}]: {args['content'][:60]}.", None
 
     elif name == "export_memory":
         data = export_memory()
-        summary = (f"Память: {data['stats'].get('facts',0)} фактов, "
-                   f"{data['stats'].get('contacts',0)} контактов, "
-                   f"{data['stats'].get('active_projects',0)} проектов, "
-                   f"{data['stats'].get('notes',0)} заметок, "
-                   f"{data['stats'].get('total_conversations',0)} разговоров.")
-        return summary, None
+        s = data['stats']
+        return (f"Mälu: {s.get('facts',0)} fakti, {s.get('contacts',0)} kontakti, "
+                f"{s.get('active_projects',0)} projekti, {s.get('notes',0)} märkust, "
+                f"{s.get('total_conversations',0)} vestlust."), None
 
     elif name == "save_project":
         save_project(args["name"], args.get("description",""), args.get("notes",""), args.get("status","active"))
-        return f"Проект '{args['name']}' сохранён, сэр.", None
+        return f"Projekt '{args['name']}' salvestatud.", None
 
     elif name == "save_contact":
         save_contact(args["name"], args.get("phone",""), args.get("email",""), args.get("notes",""))
-        return f"Контакт '{args['name']}' сохранён, сэр.", None
+        return f"Kontakt '{args['name']}' salvestatud.", None
 
     elif name == "save_note":
         save_note(args["content"], args.get("tags",""))
-        return f"Заметка сохранена, сэр: {args['content'][:60]}{'...' if len(args['content'])>60 else ''}", None
+        return f"Märkus salvestatud: {args['content'][:60]}{'...' if len(args['content'])>60 else ''}", None
 
     elif name == "search_memory":
         q = args.get("query","")
@@ -427,32 +425,32 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
         kbs = search_knowledge(q)
         idx = search_memory_index(q)
         parts = []
-        if contact: parts.append(f"Контакт: {contact['name']} тел:{contact['phone']}")
-        if projects: parts.append("Проекты: " + ", ".join(p["name"] for p in projects[:3]))
-        if notes: parts.append("Заметки: " + " | ".join(n["content"][:80] for n in notes[:3]))
+        if contact: parts.append(f"Kontakt: {contact['name']} tel:{contact['phone']}")
+        if projects: parts.append("Projektid: " + ", ".join(p["name"] for p in projects[:3]))
+        if notes: parts.append("Märkused: " + " | ".join(n["content"][:80] for n in notes[:3]))
         if kbs: parts.append("Teadmistebaas: " + " | ".join(f"{k['title']}: {k['content'][:60]}" for k in kbs[:2]))
         if idx: parts.append("Indeks: " + " | ".join(f"{i['title']} [{i['category']}]" for i in idx[:3]))
-        return "\n".join(parts) if parts else f"По запросу '{q}' ничего не найдено, сэр.", None
+        return "\n".join(parts) if parts else f"Päringule '{q}' ei leitud midagi.", None
 
     elif name == "add_knowledge":
         add_knowledge(args["title"], args["content"], args.get("category","general"),
                       args.get("tags",""), args.get("project",""))
-        return f"Teadmistebaasi lisatud: '{args['title']}' [{args.get('category','general')}], сэр.", None
+        return f"Teadmistebaasi lisatud: '{args['title']}' [{args.get('category','general')}].", None
 
     elif name == "search_knowledge":
         results = search_knowledge(args["query"], args.get("category"), args.get("project"))
         if not results:
-            return f"Teadmistebaasist '{args['query']}' ei leitud, сэр.", None
+            return f"Teadmistebaasist '{args['query']}' ei leitud.", None
         return "Leitud: " + " | ".join(f"[{r['category']}] {r['title']}: {r['content'][:80]}" for r in results[:3]), None
 
     elif name == "add_milestone":
         mid = add_milestone(args["project_name"], args["title"])
-        return f"Verstapost lisatud projekti '{args['project_name']}': {args['title']} (#{mid}), сэр.", None
+        return f"Verstapost lisatud projekti '{args['project_name']}': {args['title']} (#{mid}).", None
 
     elif name == "get_milestones":
         ms = get_milestones(args["project_name"])
         if not ms:
-            return f"Projektil '{args['project_name']}' pole pooleliolevaid verstaposte, сэр.", None
+            return f"Projektil '{args['project_name']}' pole pooleliolevaid verstaposte.", None
         return "Verstapostid: " + " | ".join(f"#{m['id']} {m['title']}" for m in ms), None
 
     elif name == "show_memory":
@@ -461,29 +459,29 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
         if cat in ("all","facts"):
             from memory.memory import get_all_facts
             facts = get_all_facts()
-            if facts: parts.append("Факты: " + ", ".join(f"{k}={v}" for k,v in list(facts.items())[:10]))
+            if facts: parts.append("Faktid: " + ", ".join(f"{k}={v}" for k,v in list(facts.items())[:10]))
         if cat in ("all","contacts"):
             cts = get_all_contacts()
-            if cts: parts.append("Контакты: " + ", ".join(c["name"] for c in cts[:10]))
+            if cts: parts.append("Kontaktid: " + ", ".join(c["name"] for c in cts[:10]))
         if cat in ("all","projects"):
             prs = get_projects()
-            if prs: parts.append("Проекты: " + ", ".join(p["name"] for p in prs[:10]))
+            if prs: parts.append("Projektid: " + ", ".join(p["name"] for p in prs[:10]))
         if cat in ("all","notes"):
             ns = get_recent_notes(5)
-            if ns: parts.append("Заметки: " + " | ".join(n["content"][:60] for n in ns))
-        return "\n".join(parts) if parts else "Память пуста, сэр.", None
+            if ns: parts.append("Märkused: " + " | ".join(n["content"][:60] for n in ns))
+        return "\n".join(parts) if parts else "Mälu on tühi.", None
 
     elif name == "change_primary_ai":
         _config["primary_agent"] = args.get("agent", "auto")
-        return f"Основной ИИ изменён на {args['agent']}, сэр.", None
+        return f"Peamine AI muudetud: {args['agent']}.", None
 
     elif name == "set_response_length":
-        lengths = {"brief": 150, "normal": 300, "detailed": 800}
-        _config["max_tokens"] = lengths.get(args.get("length", "normal"), 300)
-        return f"Длина ответов: {args.get('length')}, сэр.", None
+        lengths = {"brief": 150, "normal": 600, "detailed": 1200}
+        _config["max_tokens"] = lengths.get(args.get("length", "normal"), 600)
+        return f"Vastuse pikkus: {args.get('length')}.", None
 
     elif name == "run_computer_command":
-        return f"Выполняю команду на компьютере, сэр.", {
+        return f"Täidan käsu arvutis.", {
             "type": "computer_command",
             "command": args.get("command"),
             "args": args.get("args", {}),
@@ -491,18 +489,18 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
         }
 
     elif name == "analyze_screen_with_claude":
-        return f"Анализирую экран компьютера, сэр.", {
+        return f"Analüüsin arvuti ekraani.", {
             "type": "computer_command",
             "command": "analyze_with_claude",
             "args": {
-                "question": args.get("question", "Что на экране?"),
+                "question": args.get("question", "Mis ekraanil on?"),
                 "window": args.get("window", "")
             },
             "request_id": str(datetime.now().timestamp())
         }
 
     elif name == "run_claude_code_on_computer":
-        return f"Запускаю Claude Code на компьютере, сэр.", {
+        return f"Käivitan Claude Code arvutis.", {
             "type": "computer_command",
             "command": "run_claude_code",
             "args": {"prompt": args.get("prompt", "")},
@@ -511,10 +509,10 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
 
     elif name == "get_current_time":
         now = datetime.now()
-        time_str = now.strftime("%H:%M:%S")
+        time_str = now.strftime("%H:%M")
         date_str = now.strftime("%d.%m.%Y")
         weekday = ["esmaspäev","teisipäev","kolmapäev","neljapäev","reede","laupäev","pühapäev"][now.weekday()]
-        return f"Praegu on kell {time_str}, {weekday} {date_str}, сэр.", None
+        return f"Praegu on kell {time_str}, {weekday}, {date_str}.", None
 
     elif name == "calculate":
         expr = args.get("expression", "")
@@ -524,8 +522,8 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
                            "abs": abs, "round": round, "int": int, "float": float,
                            "pi": math.pi, "e": math.e}
             result = eval(expr, safe_globals)
-            return f"{expr} = {result}, сэр.", None
+            return f"{expr} = {result}", None
         except Exception as ex:
             return f"Ei suutnud arvutada '{expr}': {ex}", None
 
-    return f"Инструмент '{name}' выполнен, сэр.", None
+    return f"Tööriist '{name}' täidetud.", None

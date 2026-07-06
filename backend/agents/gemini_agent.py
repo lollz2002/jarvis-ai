@@ -29,8 +29,8 @@ async def analyze(image_b64: str = None, mime: str = "image/jpeg", prompt: str =
 
 def _default_prompt(mode: str) -> str:
     return {
-        "analyze": "Проанализируй изображение, сэр ожидает краткого отчёта.",
+        "analyze": "Analüüsi pilti ja anna lühike aruanne.",
         "identify": "Идентифицируй объекты на изображении.",
         "translate": "Найди текст на изображении и переведи его на русский язык.",
-        "default": "Готов к вашим командам, сэр.",
+        "default": "Valmis käskude täitmiseks.",
     }.get(mode, "Готов к вашим командам, сэр.")

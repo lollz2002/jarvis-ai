@@ -27,7 +27,9 @@ INTENT_PATTERNS = {
         "лодк", "boat", "яхт", "катер", "морск", "двигател лодк",
         "paat", "jaht", "meri", "mootorpaat", "purjekas",
         "якор", "курс", "скорость лодк", "gps", "navtex", "colreg",
-        "anchorage", "течь лодк", "bilge", "ruder"
+        "anchorage", "течь лодк", "bilge", "ruder",
+        "volvo penta", "volvo", "penta", "laevamootor", "paadimootor",
+        "mootoripaat", "mootori", "diagnostics", "diagonoosi",
     ],
     "construction": [
         "строительств", "ремонт", "бетон", "фундамент", "стен", "крыш",
