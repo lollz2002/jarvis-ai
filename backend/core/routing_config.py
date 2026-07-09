@@ -13,9 +13,20 @@ INTENT_PATTERNS = {
     ],
     "vision": [],  # tuvastab has_image lipuga
     "research": [
+        # Russian
         "найди", "поищи", "погода", "курс", "новости", "цена", "сейчас",
-        "сегодня", "актуальн", "кто такой", "что такое", "когда",
-        "otsi", "uudised", "ilm", "hind", "find", "search", "weather", "news", "price", "who is", "what is"
+        "сегодня", "актуальн", "кто такой", "что такое", "когда был", "кто выиграл",
+        "последн", "текущ", "в этом году", "в 2024", "в 2025",
+        # English
+        "find", "search", "weather", "news", "price", "who is", "what is", "when was",
+        "latest", "current", "today", "recently", "right now",
+        # Estonian — factual / real-time / current info
+        "otsi", "uudised", "ilm", "hind", "praegu", "täna", "hetkel", "hiljuti",
+        "viimati", "kes on", "mis on", "millal", "kus on", "kui palju maksab",
+        "bitcoin", "krüpto", "aktsia", "valuuta", "euro", "dollar",
+        "temperatuur", "prognoos", "ilmaprognoos",
+        "võitis", "kaotas", "tulemus", "skoor",
+        "2024", "2025", "sel aastal", "sel nädalal",
     ],
     "bmw_diagnostics": [
         "bmw", "бмв", "двигател", "мотор", "ошибка bmw", "неисправн", "obd", "dtc",

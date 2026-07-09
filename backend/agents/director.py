@@ -126,7 +126,7 @@ async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools
     ws_commands = []
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            body = {"model": model, "max_tokens": get_cfg("max_tokens", 600), "messages": messages}
+            body = {"model": model, "max_tokens": get_cfg("max_tokens", 1500), "messages": messages}
             if use_tools: body.update({"tools": TOOLS, "tool_choice": "auto"})
             resp = await client.post(OPENAI_URL,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=body)
@@ -143,7 +143,7 @@ async def _call_openai(prompt, image_b64, system, key, model="gpt-4o", use_tools
                 # Use same model for tool result — not mini
                 resp2 = await client.post(OPENAI_URL,
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json={"model": model, "max_tokens": get_cfg("max_tokens", 600), "messages": messages})
+                    json={"model": model, "max_tokens": get_cfg("max_tokens", 1500), "messages": messages})
                 if resp2.status_code == 200:
                     return resp2.json()["choices"][0]["message"]["content"], ws_commands
             return msg.get("content"), ws_commands
@@ -163,7 +163,7 @@ async def _call_claude(prompt, image_b64, system, key, model="claude-sonnet-4-6"
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post("https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": model, "max_tokens": get_cfg("max_tokens", 600),
+                json={"model": model, "max_tokens": get_cfg("max_tokens", 1500),
                       "system": system, "messages": messages})
             if resp.status_code == 200: return resp.json()["content"][0]["text"]
     except Exception: pass

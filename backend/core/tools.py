@@ -327,7 +327,7 @@ _config = {
     "voice_engine": "openai",
     "voice_id": "onyx",
     "primary_agent": "auto",
-    "max_tokens": 300,
+    "max_tokens": 1500,
 }
 
 def get_cfg(key, default=None):
@@ -476,8 +476,8 @@ def execute_tool(name: str, args: dict) -> tuple[str, dict | None]:
         return f"Peamine AI muudetud: {args['agent']}.", None
 
     elif name == "set_response_length":
-        lengths = {"brief": 150, "normal": 600, "detailed": 1200}
-        _config["max_tokens"] = lengths.get(args.get("length", "normal"), 600)
+        lengths = {"brief": 200, "normal": 1500, "detailed": 3000}
+        _config["max_tokens"] = lengths.get(args.get("length", "normal"), 1500)
         return f"Vastuse pikkus: {args.get('length')}.", None
 
     elif name == "run_computer_command":
